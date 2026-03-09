@@ -260,7 +260,8 @@ export default function App() {
     email: '',
     whatsapp: '',
     instagram: '',
-    password: ''
+    password: '',
+    confirmPassword: ''
   });
   const [loginData, setLoginData] = useState({
     email: '',
@@ -547,16 +548,39 @@ export default function App() {
     e.preventDefault();
     setLoading(true);
     setAuthError(null);
+
+    // Password complexity validation: min 6 chars, 1 letter, 5 numbers
+    const hasLetter = /[a-zA-Z]/.test(signupData.password);
+    const digitCount = (signupData.password.match(/\d/g) || []).length;
+
+    if (signupData.password.length < 6 || !hasLetter || digitCount < 5) {
+      setAuthError("A senha deve ter no mínimo 6 caracteres, contendo pelo menos 1 letra e 5 números.");
+      setLoading(false);
+      return;
+    }
+
+    if (signupData.password !== signupData.confirmPassword) {
+      setAuthError("As senhas não coincidem.");
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(signupData)
+        body: JSON.stringify({
+          name: signupData.name,
+          email: signupData.email,
+          whatsapp: signupData.whatsapp,
+          instagram: signupData.instagram,
+          password: signupData.password
+        })
       });
       const data = await res.json();
       if (res.ok) {
         showToast('Cadastro recebido! O organizador está analisando sua solicitação. Você receberá uma confirmação em breve.', 'success');
-        setSignupData({ name: '', email: '', whatsapp: '', instagram: '', password: '' });
+        setSignupData({ name: '', email: '', whatsapp: '', instagram: '', password: '', confirmPassword: '' });
         setView('login');
       } else {
         setAuthError(data.error || 'Erro ao realizar cadastro');
@@ -1217,13 +1241,32 @@ export default function App() {
                       onChange={(e: any) => setSignupData({...signupData, instagram: e.target.value})}
                     />
                   </div>
+                  <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 mb-2">
+                    <div className="flex items-start gap-2">
+                      <Info className="size-4 text-blue-600 mt-0.5 shrink-0" />
+                      <p className="text-[10px] text-blue-700 font-medium leading-tight">
+                        Sua senha deve ter no mínimo **6 caracteres**, contendo pelo menos **1 letra** e **5 números**.
+                      </p>
+                    </div>
+                  </div>
+
                   <Input 
                     label="Crie uma Senha" 
                     icon={Lock} 
                     type="password"
-                    placeholder="Mínimo 6 caracteres"
+                    placeholder="Mínimo 6 caracteres (1 letra, 5 números)"
                     value={signupData.password}
                     onChange={(e: any) => setSignupData({...signupData, password: e.target.value})}
+                    required
+                  />
+
+                  <Input 
+                    label="Confirme sua Senha" 
+                    icon={Lock} 
+                    type="password"
+                    placeholder="Repita a senha criada"
+                    value={signupData.confirmPassword}
+                    onChange={(e: any) => setSignupData({...signupData, confirmPassword: e.target.value})}
                     required
                   />
                   

@@ -577,6 +577,16 @@ async function startServer() {
       return res.status(400).json({ error: "Nome, E-mail, WhatsApp e Senha são obrigatórios." });
     }
 
+    // Password complexity validation: min 6 chars, 1 letter, 5 numbers
+    const hasLetter = /[a-zA-Z]/.test(password);
+    const digitCount = (password.match(/\d/g) || []).length;
+
+    if (password.length < 6 || !hasLetter || digitCount < 5) {
+      return res.status(400).json({ 
+        error: "A senha deve ter no mínimo 6 caracteres, contendo pelo menos 1 letra e 5 números." 
+      });
+    }
+
     const event = getActiveEvent();
     const defaultValue = event ? event.valor_por_pessoa : 0;
     const guestCode = generateGuestCode();
