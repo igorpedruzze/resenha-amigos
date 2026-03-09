@@ -53,9 +53,19 @@ const emailTemplate = (content: string, event: any) => `
 
 async function startServer() {
   const DB_PATH = process.env.DATABASE_PATH || "eventpro.db";
+  const dbDir = path.dirname(DB_PATH);
+  if (!fs.existsSync(dbDir)) {
+    console.log(`Creating directory for database: ${dbDir}`);
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
   console.log(`Initializing database at ${DB_PATH}...`);
   const db = new Database(DB_PATH);
   const SETTINGS_FILE = process.env.SETTINGS_PATH || path.join(__dirname, "settings.json");
+  const settingsDir = path.dirname(SETTINGS_FILE);
+  if (!fs.existsSync(settingsDir)) {
+    console.log(`Creating directory for settings: ${settingsDir}`);
+    fs.mkdirSync(settingsDir, { recursive: true });
+  }
 
   function saveSettingsBackup() {
     try {
