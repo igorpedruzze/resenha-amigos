@@ -52,20 +52,9 @@ const emailTemplate = (content: string, event: any) => `
 `;
 
 async function startServer() {
-  const DB_PATH = process.env.DATABASE_PATH || "eventpro.db";
-  const dbDir = path.dirname(DB_PATH);
-  if (!fs.existsSync(dbDir)) {
-    console.log(`Creating directory for database: ${dbDir}`);
-    fs.mkdirSync(dbDir, { recursive: true });
-  }
-  console.log(`Initializing database at ${DB_PATH}...`);
-  const db = new Database(DB_PATH);
-  const SETTINGS_FILE = process.env.SETTINGS_PATH || path.join(__dirname, "settings.json");
-  const settingsDir = path.dirname(SETTINGS_FILE);
-  if (!fs.existsSync(settingsDir)) {
-    console.log(`Creating directory for settings: ${settingsDir}`);
-    fs.mkdirSync(settingsDir, { recursive: true });
-  }
+  console.log("Initializing database...");
+  const db = new Database("eventpro.db");
+  const SETTINGS_FILE = path.join(__dirname, "settings.json");
 
   function saveSettingsBackup() {
     try {
@@ -583,6 +572,11 @@ async function startServer() {
 
   app.post("/api/auth/signup", (req, res) => {
     const { name, email, whatsapp, instagram, password } = req.body;
+
+    if (!name || !email || !whatsapp || !password) {
+      return res.status(400).json({ error: "Nome, E-mail, WhatsApp e Senha são obrigatórios." });
+    }
+
     const event = getActiveEvent();
     const defaultValue = event ? event.valor_por_pessoa : 0;
     const guestCode = generateGuestCode();
@@ -610,6 +604,23 @@ async function startServer() {
         sendEmail(email, `Solicitação Recebida - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
           if (success) addLog(user.id, user.nome, 'E-mail Enviado', `E-mail de boas-vindas enviado para ${email}.`);
         });
+
+        // Notify Admin
+        const admin = db.prepare("SELECT email FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
+        if (admin && admin.email) {
+          const adminContent = `
+            <p>Olá Administrador,</p>
+            <p>Um novo pré-cadastro foi realizado no sistema:</p>
+            <ul>
+              <li><strong>Nome:</strong> ${name}</li>
+              <li><strong>E-mail:</strong> ${email}</li>
+              <li><strong>WhatsApp:</strong> ${whatsapp || 'Não informado'}</li>
+              <li><strong>Instagram:</strong> ${instagram || 'Não informado'}</li>
+            </ul>
+            <p>Acesse o painel para aprovar ou recusar este convidado.</p>
+          `;
+          sendEmail(admin.email, `Novo Pré-Cadastro: ${name}`, emailTemplate(adminContent, event));
+        }
       }
 
       res.json(user);
@@ -778,6 +789,22 @@ async function startServer() {
       ORDER BY p.data_pagamento ASC
     `).all();
     res.json(payments);
+  });
+
+  app.post("/api/admin/guests/update-all-values", (req, res) => {
+    const { valor } = req.body;
+    if (valor === undefined || isNaN(Number(valor))) {
+      return res.status(400).json({ error: "Valor inválido" });
+    }
+
+    try {
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
+      db.prepare("UPDATE usuarios SET valor_total = ? WHERE role = 'guest'").run(Number(valor));
+      addLog(admin?.id || null, admin?.nome || 'Adm', 'Atualização em Massa', `Adm ${admin?.nome} atualizou o valor de todos os convidados para R$ ${valor}.`);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // Guest Management Endpoints

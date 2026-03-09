@@ -17,7 +17,6 @@ import {
   ArrowRight, 
   LogOut, 
   Bell, 
-  HelpCircle, 
   Wallet, 
   Clock, 
   CheckCircle, 
@@ -240,6 +239,13 @@ export default function App() {
     type: 'manual' | 'approval';
   } | null>(null);
   const [guestFilter, setGuestFilter] = useState<'ativo' | 'pendente' | 'recusado'>('ativo');
+  const [updateAllValue, setUpdateAllValue] = useState('');
+  const [showUpdateAllConfirm, setShowUpdateAllConfirm] = useState(false);
+
+  const hasPendingActions = pendingPayments.length > 0 || 
+    guests.some(g => g.status === 'pendente') ||
+    guests.some(g => g.companions?.some((c: any) => c.status === 'pendente_aprovacao'));
+
 
   useEffect(() => {
     if (lastActionNotification) {
@@ -794,6 +800,36 @@ export default function App() {
     } finally {
       setLoading(false);
       setDeleteConfirmId(null);
+    }
+  };
+
+  const handleUpdateAllGuestValues = async () => {
+    if (!updateAllValue || isNaN(Number(updateAllValue))) {
+      showToast('Informe um valor válido', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/guests/update-all-values', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ valor: Number(updateAllValue) })
+      });
+
+      if (res.ok) {
+        showToast(`Valor de todos os convidados atualizado para R$ ${updateAllValue}!`);
+        setShowUpdateAllConfirm(false);
+        setUpdateAllValue('');
+        await Promise.all([fetchGuests(), fetchAdminStats()]);
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Erro ao atualizar valores', 'error');
+      }
+    } catch (err) {
+      showToast('Erro de conexão', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1778,12 +1814,11 @@ export default function App() {
               <span className="px-3 py-1 bg-blue-100 text-blue-600 text-[10px] font-bold rounded-full hidden sm:inline">ATIVO</span>
             </div>
             <div className="flex items-center gap-2 md:gap-4">
-              <div className="relative hidden sm:block">
-                <HelpCircle className="text-slate-400 size-5" />
-              </div>
-              <button className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg relative">
+              <button className={`p-2 rounded-lg relative transition-colors ${hasPendingActions ? 'text-red-500 bg-red-50' : 'text-slate-500 hover:bg-slate-100'}`}>
                 <Bell className="size-5" />
-                <span className="absolute top-2 right-2 size-2 bg-red-500 rounded-full border-2 border-white"></span>
+                {hasPendingActions && (
+                  <span className="absolute top-2 right-2 size-2 bg-red-500 rounded-full border-2 border-white"></span>
+                )}
               </button>
             </div>
           </header>
@@ -2117,6 +2152,38 @@ export default function App() {
                     >
                       <Plus className="size-5" />
                       <span className="hidden md:inline">Novo Convidado</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Update All Values Section */}
+                <div className="bg-amber-50 border border-amber-200 p-4 md:p-6 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-4">
+                  <div className="flex items-start gap-4">
+                    <div className="size-12 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
+                      <RefreshCw className="size-6" />
+                    </div>
+                    <div>
+                      <h4 className="font-black text-slate-900">Atualizar Valor de Todos</h4>
+                      <p className="text-sm text-slate-600 font-medium">Define um novo valor de convite para TODOS os convidados cadastrados.</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 w-full md:w-auto">
+                    <div className="relative flex-1 md:w-32">
+                      <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 size-4" />
+                      <input 
+                        type="number"
+                        placeholder="0,00"
+                        className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all outline-none text-slate-900 font-bold text-sm"
+                        value={updateAllValue}
+                        onChange={(e) => setUpdateAllValue(e.target.value)}
+                      />
+                    </div>
+                    <button 
+                      onClick={() => setShowUpdateAllConfirm(true)}
+                      disabled={!updateAllValue || loading}
+                      className="bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-black px-6 py-2.5 rounded-xl transition-all shadow-lg shadow-amber-500/20 text-sm whitespace-nowrap"
+                    >
+                      Atualizar Todos
                     </button>
                   </div>
                 </div>
@@ -2956,6 +3023,7 @@ export default function App() {
                       placeholder="(11) 99999-9999"
                       value={guestFormData.whatsapp}
                       onChange={(e: any) => setGuestFormData({...guestFormData, whatsapp: e.target.value})}
+                      required
                     />
                     <Input 
                       label="Instagram" 
@@ -2979,10 +3047,11 @@ export default function App() {
                     <Input 
                       label="Senha Provisória" 
                       icon={Lock} 
-                      type="password"
+                      type="password" 
                       placeholder="Mínimo 6 caracteres"
                       value={guestFormData.password}
                       onChange={(e: any) => setGuestFormData({...guestFormData, password: e.target.value})}
+                      required
                     />
                   )}
                   <div className="pt-4 flex gap-3">
@@ -3061,6 +3130,44 @@ export default function App() {
               </motion.div>
             </div>
           )}
+
+          {/* Confirmation Modal for Update All */}
+          <AnimatePresence>
+            {showUpdateAllConfirm && (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                  className="bg-white rounded-[2.5rem] p-8 md:p-10 max-w-md w-full shadow-2xl border border-slate-100 text-center"
+                >
+                  <div className="size-20 bg-amber-100 text-amber-600 rounded-3xl flex items-center justify-center mx-auto mb-6">
+                    <RefreshCw className="size-10 animate-spin-slow" />
+                  </div>
+                  <h3 className="text-2xl font-black text-slate-900 mb-3">Confirmar Atualização?</h3>
+                  <p className="text-slate-500 font-medium leading-relaxed mb-8">
+                    Isso alterará o valor do convite de <span className="text-slate-900 font-black">TODOS</span> os convidados para <span className="text-amber-600 font-black">R$ {updateAllValue}</span>. 
+                    Esta ação não pode ser desfeita em massa.
+                  </p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <button 
+                      onClick={() => setShowUpdateAllConfirm(false)}
+                      className="py-4 rounded-2xl border border-slate-200 text-slate-600 font-black hover:bg-slate-50 transition-all"
+                    >
+                      Cancelar
+                    </button>
+                    <button 
+                      onClick={handleUpdateAllGuestValues}
+                      disabled={loading}
+                      className="py-4 rounded-2xl bg-amber-500 text-white font-black hover:bg-amber-600 transition-all shadow-lg shadow-amber-500/20 disabled:opacity-50"
+                    >
+                      {loading ? 'Processando...' : 'Sim, Atualizar'}
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
 
           {/* Modal Baixa Manual */}
           <AnimatePresence>
