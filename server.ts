@@ -10,6 +10,35 @@ import { Resend } from "resend";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Ensure database directory exists
+const dbDir = path.join(__dirname, "database");
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+}
+
+// Move existing database and settings files to the database folder if they exist in the root
+const oldDbPath = path.join(__dirname, "eventpro.db");
+const newDbPath = path.join(dbDir, "eventpro.db");
+if (fs.existsSync(oldDbPath) && !fs.existsSync(newDbPath)) {
+  try {
+    fs.renameSync(oldDbPath, newDbPath);
+    console.log("Moved eventpro.db to database/ folder.");
+  } catch (e) {
+    console.error("Error moving eventpro.db:", e);
+  }
+}
+
+const oldSettingsPath = path.join(__dirname, "settings.json");
+const newSettingsPath = path.join(dbDir, "settings.json");
+if (fs.existsSync(oldSettingsPath) && !fs.existsSync(newSettingsPath)) {
+  try {
+    fs.renameSync(oldSettingsPath, newSettingsPath);
+    console.log("Moved settings.json to database/ folder.");
+  } catch (e) {
+    console.error("Error moving settings.json:", e);
+  }
+}
+
 const DEFAULT_TEMPLATES: Record<string, string> = {
   email_welcome: 'Fala {nome}! Recebi seu cadastro para o meu niver. Vou dar uma olhada aqui e já te libero!',
   email_approval_guest: 'Tudo certo! Você está confirmado na minha resenha. Use o ID {id} para entrar. Acesse seu painel em: {link}',
@@ -53,8 +82,10 @@ const emailTemplate = (content: string, event: any) => `
 
 async function startServer() {
   console.log("Initializing database...");
-  const db = new Database("eventpro.db");
-  const SETTINGS_FILE = path.join(__dirname, "settings.json");
+  const dbDir = path.join(__dirname, "database");
+  const dbPath = path.join(dbDir, "eventpro.db");
+  const db = new Database(dbPath);
+  const SETTINGS_FILE = path.join(dbDir, "settings.json");
 
   function saveSettingsBackup() {
     try {
