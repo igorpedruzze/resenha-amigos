@@ -594,6 +594,7 @@ export default function App() {
         setView('login');
       } else {
         setAuthError(data.error || 'Erro ao realizar cadastro');
+        showToast(data.error || 'Erro ao realizar cadastro', 'error');
       }
     } catch (error) {
       setAuthError('Erro de conexão com o servidor');
@@ -763,14 +764,14 @@ export default function App() {
     if (!user) return;
     setLoading(true);
     try {
-      console.log(`Frontend: Rejecting and deleting guest ${guestId}`);
+      console.log(`Frontend: Rejecting guest ${guestId}`);
       const res = await fetch('/api/admin/reject-guest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ guestId, adminId: user.id, adminName: user.nome })
       });
       if (res.ok) {
-        showToast('Cadastro recusado e removido com sucesso.');
+        showToast('Cadastro recusado com sucesso.');
         if (editingGuest?.id === guestId) {
           setEditingGuest(null);
           setGuestFormData({ nome: '', email: '', whatsapp: '', instagram: '', password: '', valor_total: '' });
@@ -786,6 +787,51 @@ export default function App() {
     } finally {
       setLoading(false);
       setRejectGuestConfirmId(null);
+    }
+  };
+
+  const handleReactivateGuest = async (guestId: number) => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/reactivate-guest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guestId, adminId: user.id, adminName: user.nome })
+      });
+      if (res.ok) {
+        showToast('Convidado reativado com sucesso!');
+        await Promise.all([fetchAdminStats(), fetchGuests()]);
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Erro ao reativar convidado', 'error');
+      }
+    } catch (err) {
+      showToast('Erro de conexão ao reativar', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteGuest = async (id: number) => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      console.log(`Frontend: Deleting guest ${id}`);
+      const res = await fetch(`/api/admin/guests/${id}?adminId=${user.id}&adminName=${encodeURIComponent(user.nome)}`, { method: 'DELETE' });
+      if (res.ok) {
+        showToast('Convidado excluído permanentemente');
+        await Promise.all([fetchGuests(), fetchAdminStats()]);
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Erro ao excluir convidado', 'error');
+      }
+    } catch (err: any) {
+      console.error('Delete guest error:', err);
+      showToast('Erro de conexão: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+      setDeleteConfirmId(null);
     }
   };
 
@@ -813,27 +859,6 @@ export default function App() {
     } else {
       const data = await res.json();
       showToast(data.error || 'Erro ao salvar convidado', 'error');
-    }
-  };
-
-  const handleDeleteGuest = async (id: number) => {
-    setLoading(true);
-    try {
-      console.log(`Frontend: Deleting guest ${id}`);
-      const res = await fetch(`/api/admin/guests/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        showToast('Convidado excluído com sucesso');
-        await Promise.all([fetchGuests(), fetchAdminStats()]);
-      } else {
-        const data = await res.json();
-        showToast(data.error || 'Erro ao excluir convidado', 'error');
-      }
-    } catch (err: any) {
-      console.error('Delete guest error:', err);
-      showToast('Erro de conexão: ' + err.message, 'error');
-    } finally {
-      setLoading(false);
-      setDeleteConfirmId(null);
     }
   };
 
@@ -1158,7 +1183,7 @@ export default function App() {
               </div>
 
               {view === 'forgot-password' ? (
-                <form onSubmit={handleForgotPassword} className="space-y-5">
+                <form onSubmit={handleForgotPassword} method="POST" className="space-y-5">
                   <Input 
                     id="forgot_email"
                     name="email"
@@ -1193,10 +1218,10 @@ export default function App() {
                   </button>
                 </form>
               ) : view === 'reset-password' ? (
-                <form onSubmit={handleResetPassword} className="space-y-5">
+                <form onSubmit={handleResetPassword} method="POST" className="space-y-5">
                   <Input 
-                    id="reset_password"
-                    name="new-password"
+                    id="user_secure_password"
+                    name="user_secure_password"
                     label="Nova Senha" 
                     icon={Lock} 
                     type="password" 
@@ -1207,8 +1232,8 @@ export default function App() {
                     required
                   />
                   <Input 
-                    id="confirm_reset_password"
-                    name="confirm-password"
+                    id="confirm_user_secure_password"
+                    name="confirm_user_secure_password"
                     label="Confirmar Nova Senha" 
                     icon={Lock} 
                     type="password" 
@@ -1233,7 +1258,7 @@ export default function App() {
                   </button>
                 </form>
               ) : view === 'signup' ? (
-                <form onSubmit={handleSignup} className="space-y-5">
+                <form onSubmit={handleSignup} method="POST" className="space-y-5">
                   <Input 
                     id="signup_name"
                     name="name"
@@ -1251,7 +1276,7 @@ export default function App() {
                     label="E-mail" 
                     icon={Mail} 
                     type="email"
-                    autoComplete="username"
+                    autoComplete="email"
                     placeholder="seu@email.com"
                     value={signupData.email}
                     onChange={(e: any) => setSignupData({...signupData, email: e.target.value})}
@@ -1289,8 +1314,8 @@ export default function App() {
                   </div>
 
                   <Input 
-                    id="signup_password"
-                    name="password"
+                    id="user_secure_password"
+                    name="user_secure_password"
                     label="Crie uma Senha" 
                     icon={Lock} 
                     type="password"
@@ -1302,8 +1327,8 @@ export default function App() {
                   />
 
                   <Input 
-                    id="signup_confirm_password"
-                    name="confirm_password"
+                    id="confirm_user_secure_password"
+                    name="confirm_user_secure_password"
                     label="Confirme sua Senha" 
                     icon={Lock} 
                     type="password"
@@ -1330,22 +1355,22 @@ export default function App() {
                   </button>
                 </form>
               ) : (
-                <form onSubmit={handleLogin} className="space-y-5">
+                <form onSubmit={handleLogin} method="POST" className="space-y-5">
                   <Input 
                     id="login_email"
                     name="email"
                     label="E-mail" 
                     icon={Mail} 
                     type="email"
-                    autoComplete="username"
+                    autoComplete="email"
                     placeholder="seu@email.com"
                     value={loginData.email}
                     onChange={(e: any) => setLoginData({...loginData, email: e.target.value})}
                     required
                   />
                   <Input 
-                    id="login_password"
-                    name="password"
+                    id="user_secure_password"
+                    name="user_secure_password"
                     label="Senha" 
                     icon={Lock} 
                     type="password"
@@ -2411,11 +2436,36 @@ export default function App() {
                                         {rejectGuestConfirmId === g.id ? "Confirmar?" : "Recusar"}
                                       </button>
                                     </>
+                                  ) : g.status === 'recusado' ? (
+                                    <>
+                                      <button 
+                                        onClick={() => handleReactivateGuest(g.id)}
+                                        className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-lg transition-all flex items-center gap-1"
+                                      >
+                                        <RefreshCw className="size-3" />
+                                        Reativar
+                                      </button>
+                                      <button 
+                                        onClick={() => {
+                                          if (deleteConfirmId === g.id) {
+                                            handleDeleteGuest(g.id);
+                                          } else {
+                                            setDeleteConfirmId(g.id);
+                                            setTimeout(() => setDeleteConfirmId(null), 3000);
+                                          }
+                                        }}
+                                        className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all flex items-center gap-1 ${deleteConfirmId === g.id ? 'bg-red-700 text-white animate-pulse' : 'bg-red-500 hover:bg-red-600 text-white'}`}
+                                        title={deleteConfirmId === g.id ? "Clique novamente para confirmar" : "Excluir Permanentemente"}
+                                      >
+                                        <Trash2 className="size-3" />
+                                        {deleteConfirmId === g.id ? "Confirmar?" : "Excluir"}
+                                      </button>
+                                    </>
                                   ) : (
                                     <>
                                       <button 
                                         onClick={() => {
-                                          const template = templates.find(t => t.tipo === 'cobranca')?.conteudo || '';
+                                          const template = templates.find(t => t.tipo === 'wa_cobranca')?.conteudo || '';
                                           const message = replaceTags(template, {
                                             nome_convidado: g.nome,
                                             saldo_devedor: amountDue,
@@ -2664,9 +2714,12 @@ export default function App() {
                           </p>
                         </div>
                         <Input 
+                          id="resend_api_key"
+                          name="resend_api_key"
                           label="API Key do Resend" 
                           icon={Key} 
                           type="password"
+                          autoComplete="off"
                           placeholder="re_123456789..."
                           value={configForm.event.resend_api_key || ''}
                           onChange={(e: any) => setConfigForm({
@@ -2719,9 +2772,12 @@ export default function App() {
                           })}
                         />
                         <Input 
+                          id="smtp_password"
+                          name="smtp_password"
                           label="Senha SMTP" 
                           icon={Lock} 
                           type="password"
+                          autoComplete="off"
                           placeholder="••••••••"
                           value={configForm.event.smtp_pass || ''}
                           onChange={(e: any) => setConfigForm({
@@ -2952,27 +3008,36 @@ export default function App() {
                     <Lock className="text-red-600 size-6" />
                     <h4 className="font-bold text-slate-900">Segurança</h4>
                   </div>
-                  <form onSubmit={handleChangePassword} className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
+                  <form onSubmit={handleChangePassword} method="POST" className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
                     <Input 
+                      id="current_user_secure_password"
+                      name="current_user_secure_password"
                       label="Senha Atual" 
                       icon={Lock} 
                       type="password"
+                      autoComplete="current-password"
                       value={passwordForm.current}
                       onChange={(e: any) => setPasswordForm({ ...passwordForm, current: e.target.value })}
                       required
                     />
                     <Input 
+                      id="user_secure_password"
+                      name="user_secure_password"
                       label="Nova Senha" 
                       icon={Lock} 
                       type="password"
+                      autoComplete="new-password"
                       value={passwordForm.new}
                       onChange={(e: any) => setPasswordForm({ ...passwordForm, new: e.target.value })}
                       required
                     />
                     <Input 
+                      id="confirm_user_secure_password"
+                      name="confirm_user_secure_password"
                       label="Confirmar Nova Senha" 
                       icon={Lock} 
                       type="password"
+                      autoComplete="new-password"
                       value={passwordForm.confirm}
                       onChange={(e: any) => setPasswordForm({ ...passwordForm, confirm: e.target.value })}
                       required
@@ -3099,8 +3164,10 @@ export default function App() {
                     <Plus className="size-6 rotate-45" />
                   </button>
                 </div>
-                <form onSubmit={handleSaveGuest} className="p-8 space-y-4">
+                <form onSubmit={handleSaveGuest} method="POST" className="p-8 space-y-4">
                   <Input 
+                    id="guest_name"
+                    name="name"
                     label="Nome Completo" 
                     icon={User} 
                     placeholder="Ex: João Silva"
@@ -3109,9 +3176,12 @@ export default function App() {
                     required
                   />
                   <Input 
+                    id="guest_email"
+                    name="email"
                     label="E-mail" 
                     icon={Mail} 
                     type="email"
+                    autoComplete="email"
                     placeholder="joao@email.com"
                     value={guestFormData.email}
                     onChange={(e: any) => setGuestFormData({...guestFormData, email: e.target.value})}
@@ -3119,6 +3189,8 @@ export default function App() {
                   />
                   <div className="grid grid-cols-2 gap-4">
                     <Input 
+                      id="guest_whatsapp"
+                      name="whatsapp"
                       label="WhatsApp" 
                       icon={Phone} 
                       placeholder="(11) 99999-9999"
@@ -3127,6 +3199,8 @@ export default function App() {
                       required
                     />
                     <Input 
+                      id="guest_instagram"
+                      name="instagram"
                       label="Instagram" 
                       icon={Instagram} 
                       placeholder="@usuario"
@@ -3135,6 +3209,8 @@ export default function App() {
                     />
                   </div>
                   <Input 
+                    id="guest_value"
+                    name="value"
                     label="Valor do Convite (R$)" 
                     icon={Wallet} 
                     type="number"
@@ -3146,9 +3222,12 @@ export default function App() {
                   />
                   {!editingGuest && (
                     <Input 
+                      id="user_secure_password"
+                      name="user_secure_password"
                       label="Senha Provisória" 
                       icon={Lock} 
                       type="password" 
+                      autoComplete="new-password"
                       placeholder="Mínimo 6 caracteres"
                       value={guestFormData.password}
                       onChange={(e: any) => setGuestFormData({...guestFormData, password: e.target.value})}

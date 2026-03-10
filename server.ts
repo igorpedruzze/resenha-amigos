@@ -635,6 +635,19 @@ async function startServer() {
       return res.status(400).json({ error: "Nome, E-mail, WhatsApp e Senha são obrigatórios." });
     }
 
+    // Duplicity check
+    const existingUser = db.prepare("SELECT status FROM usuarios WHERE LOWER(email) = LOWER(?) OR (instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?))").get(email, instagram) as any;
+    if (existingUser) {
+      if (existingUser.status === 'ativo') {
+        return res.status(400).json({ error: "Você já está na lista! Verifique seu e-mail." });
+      } else if (existingUser.status === 'pendente') {
+        return res.status(400).json({ error: "Seu cadastro já foi recebido e está aguardando aprovação." });
+      } else if (existingUser.status === 'recusado') {
+        return res.status(400).json({ error: "Seu cadastro já foi realizado. Aguarde a ativação pelos organizadores." });
+      }
+      return res.status(400).json({ error: "Este e-mail ou instagram já está cadastrado." });
+    }
+
     // Password complexity validation: min 6 chars, 1 letter
     const hasLetter = /[a-zA-Z]/.test(password);
 
@@ -1316,18 +1329,50 @@ async function startServer() {
         return res.status(404).json({ error: "Convidado não encontrado" });
       }
 
-      // Actually delete to satisfy "Recusar" button expectation of removal
-      console.log(`Deleting all data for guest ${guestId} (${guest.nome})`);
-      db.prepare("DELETE FROM pagamentos WHERE usuario_id = ?").run(guestId);
-      db.prepare("DELETE FROM acompanhantes WHERE usuario_id = ?").run(guestId);
-      db.prepare("DELETE FROM logs_atividades WHERE usuario_id = ?").run(guestId);
-      db.prepare("DELETE FROM usuarios WHERE id = ?").run(guestId);
+      // Just update status to 'recusado'
+      db.prepare("UPDATE usuarios SET status = 'recusado' WHERE id = ?").run(guestId);
       
-      addLog(adminId, adminName, 'Recusa de Convidado', `O administrador ${adminName} recusou e removeu o cadastro de ${guest.nome}.`);
+      addLog(adminId, adminName, 'Recusa de Convidado', `O administrador ${adminName} recusou o cadastro de ${guest.nome}.`);
       
       res.json({ success: true });
     } catch (error: any) {
       console.error("Reject guest error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/reactivate-guest", (req, res) => {
+    const { guestId, adminId, adminName } = req.body;
+    try {
+      const guest = db.prepare("SELECT nome FROM usuarios WHERE id = ?").get(guestId) as any;
+      if (!guest) return res.status(404).json({ error: "Convidado não encontrado" });
+
+      db.prepare("UPDATE usuarios SET status = 'ativo' WHERE id = ?").run(guestId);
+      addLog(adminId, adminName, 'Reativação de Convidado', `O administrador ${adminName} reativou o cadastro de ${guest.nome}.`);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/admin/guests/:id", (req, res) => {
+    const { id } = req.params;
+    const { adminId, adminName } = req.query;
+    try {
+      const guest = db.prepare("SELECT nome FROM usuarios WHERE id = ?").get(id) as any;
+      if (!guest) return res.status(404).json({ error: "Convidado não encontrado" });
+
+      db.prepare("DELETE FROM pagamentos WHERE usuario_id = ?").run(id);
+      db.prepare("DELETE FROM acompanhantes WHERE usuario_id = ?").run(id);
+      db.prepare("DELETE FROM logs_atividades WHERE usuario_id = ?").run(id);
+      db.prepare("DELETE FROM usuarios WHERE id = ?").run(id);
+      
+      if (adminId && adminName) {
+        addLog(Number(adminId), String(adminName), 'Exclusão Permanente', `O administrador ${adminName} excluiu permanentemente o cadastro de ${guest.nome}.`);
+      }
+      
+      res.json({ success: true });
+    } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
