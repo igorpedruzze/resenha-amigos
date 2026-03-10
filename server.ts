@@ -414,6 +414,28 @@ async function startServer() {
       acao TEXT,
       mensagem TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS custos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      evento_id INTEGER NOT NULL,
+      descricao TEXT NOT NULL,
+      quantidade REAL DEFAULT 1,
+      unidade TEXT,
+      valor_unitario REAL DEFAULT 0,
+      total REAL DEFAULT 0,
+      categoria TEXT,
+      FOREIGN KEY (evento_id) REFERENCES eventos(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS vendas_extras (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      evento_id INTEGER NOT NULL,
+      descricao TEXT NOT NULL,
+      valor REAL NOT NULL,
+      data_venda DATETIME DEFAULT CURRENT_TIMESTAMP,
+      categoria TEXT,
+      FOREIGN KEY (evento_id) REFERENCES eventos(id)
+    );
   `);
 
   try {
@@ -1612,6 +1634,12 @@ async function startServer() {
     const totalCompanions = db.prepare("SELECT COUNT(*) as count FROM acompanhantes").get() as any;
     const totalRequests = (totalGuests.count || 0) + (totalCompanions.count || 0);
 
+    const totalCustos = db.prepare("SELECT SUM(total) as total FROM custos WHERE evento_id = ?").get(event.id) as any;
+    const custos = db.prepare("SELECT * FROM custos WHERE evento_id = ?").all(event.id);
+
+    const totalVendasExtras = db.prepare("SELECT SUM(valor) as total FROM vendas_extras WHERE evento_id = ?").get(event.id) as any;
+    const vendasExtras = db.prepare("SELECT * FROM vendas_extras WHERE evento_id = ?").all(event.id);
+
     const guests = db.prepare(`
       SELECT 
         u.*, 
@@ -1625,9 +1653,13 @@ async function startServer() {
 
     res.json({
       totalArrecadado: (totalArrecadado as any).total || 0,
+      totalVendasExtras: totalVendasExtras.total || 0,
+      vendasExtras,
       totalEsperado,
       confirmedCount,
       totalRequests,
+      totalCustos: totalCustos.total || 0,
+      custos,
       capacity: event.capacidade_maxima || 50,
       guests: guests.map((g: any) => {
         const companions = db.prepare("SELECT id, nome, instagram, status FROM acompanhantes WHERE usuario_id = ?").all(g.id);
@@ -1640,6 +1672,72 @@ async function startServer() {
       eventValue: event.valor_por_pessoa,
       pixKey: event.pix_key
     });
+  });
+
+  app.get("/api/admin/costs", (req, res) => {
+    const event = getActiveEvent();
+    if (!event) return res.status(404).json({ error: "Evento não encontrado" });
+    const costs = db.prepare("SELECT * FROM custos WHERE evento_id = ?").all(event.id);
+    res.json(costs);
+  });
+
+  app.post("/api/admin/costs", (req, res) => {
+    const { costs } = req.body; // Array of costs
+    const event = getActiveEvent();
+    if (!event) return res.status(404).json({ error: "Evento não encontrado" });
+
+    try {
+      db.transaction(() => {
+        // Simple approach: delete all and re-insert for bulk update
+        // Or we could do a more sophisticated sync. For now, let's do bulk sync.
+        db.prepare("DELETE FROM custos WHERE evento_id = ?").run(event.id);
+        const insert = db.prepare(`
+          INSERT INTO custos (evento_id, descricao, quantidade, unidade, valor_unitario, total, categoria)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const cost of costs) {
+          insert.run(
+            event.id,
+            cost.descricao,
+            cost.quantidade || 1,
+            cost.unidade || "",
+            cost.valor_unitario || 0,
+            (cost.quantidade || 1) * (cost.valor_unitario || 0),
+            cost.categoria || "Geral"
+          );
+        }
+      })();
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/sales", (req, res) => {
+    const { sales } = req.body; // Array of sales
+    const event = getActiveEvent();
+    if (!event) return res.status(404).json({ error: "Evento não encontrado" });
+
+    try {
+      db.transaction(() => {
+        db.prepare("DELETE FROM vendas_extras WHERE evento_id = ?").run(event.id);
+        const insert = db.prepare(`
+          INSERT INTO vendas_extras (evento_id, descricao, valor, categoria)
+          VALUES (?, ?, ?, ?)
+        `);
+        for (const sale of sales) {
+          insert.run(
+            event.id,
+            sale.descricao,
+            sale.valor || 0,
+            sale.categoria || "Outros"
+          );
+        }
+      })();
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   app.post("/api/admin/approve-guest", (req, res) => {

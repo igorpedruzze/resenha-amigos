@@ -21,6 +21,7 @@ import {
   Clock, 
   CheckCircle, 
   TrendingUp, 
+  ShoppingBag,
   Users, 
   Filter, 
   Plus,
@@ -134,11 +135,41 @@ interface BalanceData {
   flyer_info?: string;
 }
 
+import { 
+  PieChart, 
+  Pie, 
+  Cell, 
+  ResponsiveContainer, 
+  Tooltip, 
+  Legend 
+} from 'recharts';
+
+interface Cost {
+  id?: number;
+  descricao: string;
+  quantidade: number;
+  unidade: string;
+  valor_unitario: number;
+  total: number;
+  categoria: string;
+}
+
+interface Sale {
+  id?: number;
+  descricao: string;
+  valor: number;
+  categoria: string;
+}
+
 interface AdminStats {
   totalArrecadado: number;
+  totalVendasExtras: number;
+  vendasExtras: Sale[];
   totalEsperado: number;
   confirmedCount: number;
   totalRequests: number;
+  totalCustos: number;
+  custos: Cost[];
   capacity: number;
   guests: (UserData & { paid: number })[];
   eventValue: number;
@@ -268,10 +299,284 @@ const ProfileAvatar = ({ user, size = 'md', onUpdate, showToast }: {
   );
 };
 
+const CostsView = ({ costs, sales, onSaveCosts, onSaveSales, onPrint }: { costs: Cost[], sales: Sale[], onSaveCosts: (costs: Cost[]) => void, onSaveSales: (sales: Sale[]) => void, onPrint: () => void }) => {
+  const [localCosts, setLocalCosts] = useState<Cost[]>(costs.length > 0 ? costs : [{ descricao: '', quantidade: 1, unidade: '', valor_unitario: 0, total: 0, categoria: 'Geral' }]);
+  const [localSales, setLocalSales] = useState<Sale[]>(sales.length > 0 ? sales : [{ descricao: '', valor: 0, categoria: 'Bebida' }]);
+  const [activeSubTab, setActiveSubTab] = useState<'costs' | 'sales'>('costs');
+
+  const addCostRow = () => {
+    setLocalCosts([...localCosts, { descricao: '', quantidade: 1, unidade: '', valor_unitario: 0, total: 0, categoria: 'Geral' }]);
+  };
+
+  const removeCostRow = (index: number) => {
+    const newCosts = localCosts.filter((_, i) => i !== index);
+    setLocalCosts(newCosts.length > 0 ? newCosts : [{ descricao: '', quantidade: 1, unidade: '', valor_unitario: 0, total: 0, categoria: 'Geral' }]);
+  };
+
+  const updateCostRow = (index: number, field: keyof Cost, value: any) => {
+    const newCosts = [...localCosts];
+    newCosts[index] = { ...newCosts[index], [field]: value };
+    if (field === 'quantidade' || field === 'valor_unitario') {
+      newCosts[index].total = Number(newCosts[index].quantidade) * Number(newCosts[index].valor_unitario);
+    }
+    setLocalCosts(newCosts);
+  };
+
+  const addSaleRow = () => {
+    setLocalSales([...localSales, { descricao: '', valor: 0, categoria: 'Bebida' }]);
+  };
+
+  const removeSaleRow = (index: number) => {
+    const newSales = localSales.filter((_, i) => i !== index);
+    setLocalSales(newSales.length > 0 ? newSales : [{ descricao: '', valor: 0, categoria: 'Bebida' }]);
+  };
+
+  const updateSaleRow = (index: number, field: keyof Sale, value: any) => {
+    const newSales = [...localSales];
+    newSales[index] = { ...newSales[index], [field]: value };
+    setLocalSales(newSales);
+  };
+
+  const totalCost = localCosts.reduce((acc, curr) => acc + (curr.total || 0), 0);
+  const totalSale = localSales.reduce((acc, curr) => acc + (curr.valor || 0), 0);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-black text-slate-900">Gestão Financeira</h2>
+          <p className="text-slate-500 text-sm">Controle de entradas (vendas) e saídas (custos) do seu evento.</p>
+        </div>
+        <div className="flex gap-3">
+          <button 
+            onClick={onPrint}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-200 transition-all"
+          >
+            <ExternalLink className="size-4" />
+            Relatório / Imprimir
+          </button>
+          <button 
+            onClick={() => activeSubTab === 'costs' ? onSaveCosts(localCosts) : onSaveSales(localSales)}
+            className="flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all"
+          >
+            <Check className="size-4" />
+            Salvar {activeSubTab === 'costs' ? 'Custos' : 'Vendas'}
+          </button>
+        </div>
+      </div>
+
+      <div className="flex gap-2 p-1 bg-slate-100 rounded-xl w-fit">
+        <button 
+          onClick={() => setActiveSubTab('costs')}
+          className={`px-6 py-2 rounded-lg font-bold text-sm transition-all ${activeSubTab === 'costs' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          Custos (Saídas)
+        </button>
+        <button 
+          onClick={() => setActiveSubTab('sales')}
+          className={`px-6 py-2 rounded-lg font-bold text-sm transition-all ${activeSubTab === 'sales' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          Vendas Extras (Entradas)
+        </button>
+      </div>
+
+      {activeSubTab === 'costs' ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left min-w-[800px]">
+              <thead>
+                <tr className="bg-slate-50 text-slate-500 text-[10px] font-bold uppercase tracking-wider">
+                  <th className="px-6 py-4">Descrição</th>
+                  <th className="px-6 py-4 w-24">Qtd</th>
+                  <th className="px-6 py-4 w-32">Unidade</th>
+                  <th className="px-6 py-4 w-40">Valor Unit. (R$)</th>
+                  <th className="px-6 py-4 w-40">Total (R$)</th>
+                  <th className="px-6 py-4 w-40">Categoria</th>
+                  <th className="px-6 py-4 w-16"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {localCosts.map((cost, index) => (
+                  <tr key={index} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="px-6 py-3">
+                      <input 
+                        type="text" 
+                        value={cost.descricao} 
+                        onChange={(e) => updateCostRow(index, 'descricao', e.target.value)}
+                        placeholder="Ex: Aluguel do Espaço"
+                        className="w-full bg-transparent border-none focus:ring-0 text-sm font-medium text-slate-700 placeholder:text-slate-300"
+                      />
+                    </td>
+                    <td className="px-6 py-3">
+                      <input 
+                        type="number" 
+                        value={cost.quantidade} 
+                        onChange={(e) => updateCostRow(index, 'quantidade', Number(e.target.value))}
+                        className="w-full bg-transparent border-none focus:ring-0 text-sm font-medium text-slate-700"
+                      />
+                    </td>
+                    <td className="px-6 py-3">
+                      <input 
+                        type="text" 
+                        value={cost.unidade} 
+                        onChange={(e) => updateCostRow(index, 'unidade', e.target.value)}
+                        placeholder="Ex: un, kg, l"
+                        className="w-full bg-transparent border-none focus:ring-0 text-sm font-medium text-slate-700 placeholder:text-slate-300"
+                      />
+                    </td>
+                    <td className="px-6 py-3">
+                      <input 
+                        type="number" 
+                        value={cost.valor_unitario} 
+                        onChange={(e) => updateCostRow(index, 'valor_unitario', Number(e.target.value))}
+                        className="w-full bg-transparent border-none focus:ring-0 text-sm font-medium text-slate-700"
+                      />
+                    </td>
+                    <td className="px-6 py-3">
+                      <span className="text-sm font-bold text-slate-900">
+                        {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cost.total || 0)}
+                      </span>
+                    </td>
+                    <td className="px-6 py-3">
+                      <select 
+                        value={cost.categoria} 
+                        onChange={(e) => updateCostRow(index, 'categoria', e.target.value)}
+                        className="w-full bg-transparent border-none focus:ring-0 text-sm font-medium text-slate-700 cursor-pointer"
+                      >
+                        <option value="Geral">Geral</option>
+                        <option value="Comida">Comida</option>
+                        <option value="Bebida">Bebida</option>
+                        <option value="Local">Local</option>
+                        <option value="Decoração">Decoração</option>
+                        <option value="Som/Luz">Som/Luz</option>
+                        <option value="Outros">Outros</option>
+                      </select>
+                    </td>
+                    <td className="px-6 py-3 text-right">
+                      <button 
+                        onClick={() => removeCostRow(index)}
+                        className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="bg-slate-50/80">
+                  <td colSpan={4} className="px-6 py-4 text-right font-bold text-slate-500 uppercase text-[10px] tracking-wider">
+                    Custo Total Acumulado
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className="text-lg font-black text-blue-600">
+                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalCost)}
+                    </span>
+                  </td>
+                  <td colSpan={2}></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div className="p-4 bg-slate-50 border-t border-slate-100">
+            <button 
+              onClick={addCostRow}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-50 transition-all shadow-sm"
+            >
+              <Plus className="size-4" />
+              Adicionar Item de Custo
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left min-w-[800px]">
+              <thead>
+                <tr className="bg-slate-50 text-slate-500 text-[10px] font-bold uppercase tracking-wider">
+                  <th className="px-6 py-4">Descrição da Venda</th>
+                  <th className="px-6 py-4 w-40">Valor (R$)</th>
+                  <th className="px-6 py-4 w-40">Categoria</th>
+                  <th className="px-6 py-4 w-16"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {localSales.map((sale, index) => (
+                  <tr key={index} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="px-6 py-3">
+                      <input 
+                        type="text" 
+                        value={sale.descricao} 
+                        onChange={(e) => updateSaleRow(index, 'descricao', e.target.value)}
+                        placeholder="Ex: Venda de Cerveja (Bar)"
+                        className="w-full bg-transparent border-none focus:ring-0 text-sm font-medium text-slate-700 placeholder:text-slate-300"
+                      />
+                    </td>
+                    <td className="px-6 py-3">
+                      <input 
+                        type="number" 
+                        value={sale.valor} 
+                        onChange={(e) => updateSaleRow(index, 'valor', Number(e.target.value))}
+                        className="w-full bg-transparent border-none focus:ring-0 text-sm font-medium text-slate-700"
+                      />
+                    </td>
+                    <td className="px-6 py-3">
+                      <select 
+                        value={sale.categoria} 
+                        onChange={(e) => updateSaleRow(index, 'categoria', e.target.value)}
+                        className="w-full bg-transparent border-none focus:ring-0 text-sm font-medium text-slate-700 cursor-pointer"
+                      >
+                        <option value="Bebida">Bebida</option>
+                        <option value="Comida">Comida</option>
+                        <option value="Ingresso Extra">Ingresso Extra</option>
+                        <option value="Outros">Outros</option>
+                      </select>
+                    </td>
+                    <td className="px-6 py-3 text-right">
+                      <button 
+                        onClick={() => removeSaleRow(index)}
+                        className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="bg-slate-50/80">
+                  <td className="px-6 py-4 text-right font-bold text-slate-500 uppercase text-[10px] tracking-wider">
+                    Total de Vendas Extras
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className="text-lg font-black text-emerald-600">
+                      {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalSale)}
+                    </span>
+                  </td>
+                  <td colSpan={2}></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div className="p-4 bg-slate-50 border-t border-slate-100">
+            <button 
+              onClick={addSaleRow}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-50 transition-all shadow-sm"
+            >
+              <Plus className="size-4" />
+              Adicionar Registro de Venda
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [view, setView] = useState<'signup' | 'login' | 'dashboard' | 'admin' | 'forgot-password' | 'reset-password'>('signup');
-  const [adminTab, setAdminTab] = useState<'stats' | 'validation' | 'guests' | 'messages' | 'settings' | 'logs'>('stats');
+  const [adminTab, setAdminTab] = useState<'stats' | 'validation' | 'guests' | 'messages' | 'costs' | 'settings' | 'logs'>('stats');
   const [user, setUser] = useState<UserData | null>(null);
   const [balance, setBalance] = useState<BalanceData | null>(null);
   const [adminStats, setAdminStats] = useState<AdminStats | null>(null);
@@ -558,6 +863,54 @@ export default function App() {
   const fetchPublicEvent = async () => {
     const res = await fetch('/api/public/event');
     if (res.ok) setPublicEvent(await res.json());
+  };
+
+  const handleSaveCosts = async (costs: Cost[]) => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/costs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ costs })
+      });
+      if (res.ok) {
+        showToast('Planilha de custos salva com sucesso!');
+        fetchAdminStats();
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Erro ao salvar custos', 'error');
+      }
+    } catch (err) {
+      showToast('Erro de conexão ao salvar custos', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveSales = async (sales: Sale[]) => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/sales', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sales })
+      });
+      if (res.ok) {
+        showToast('Registros de vendas salvos com sucesso!');
+        fetchAdminStats();
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Erro ao salvar vendas', 'error');
+      }
+    } catch (err) {
+      showToast('Erro de conexão ao salvar vendas', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePrintCosts = () => {
+    window.print();
   };
 
   const fetchConfig = async () => {
@@ -2346,6 +2699,13 @@ export default function App() {
               <span>Histórico</span>
             </button>
             <button 
+              onClick={() => { setAdminTab('costs'); setIsSidebarOpen(false); }}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${adminTab === 'costs' ? 'bg-white/10 text-white font-medium' : 'text-white/70 hover:bg-white/5 hover:text-white'}`}
+            >
+              <DollarSign className="size-5" />
+              <span>Custos do Evento</span>
+            </button>
+            <button 
               onClick={() => { setAdminTab('settings'); setIsSidebarOpen(false); }}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${adminTab === 'settings' ? 'bg-white/10 text-white font-medium' : 'text-white/70 hover:bg-white/5 hover:text-white'}`}
             >
@@ -2412,54 +2772,117 @@ export default function App() {
           <div className="p-8 space-y-8">
             {adminTab === 'stats' && adminStats && (
               <>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                   <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
                     <div>
-                      <p className="text-slate-500 text-sm font-medium">Total Arrecadado</p>
-                      <h3 className="text-2xl md:text-3xl font-black text-slate-900">{formatCurrency(adminStats.totalArrecadado)}</h3>
-                      <div className="flex items-center gap-1 text-emerald-600 text-[10px] font-bold">
-                        <TrendingUp className="size-3" />
-                        <span>+15.2% vs ontem</span>
-                      </div>
+                      <p className="text-slate-500 text-sm font-medium">Receita Ingressos</p>
+                      <h3 className="text-2xl font-black text-slate-900">{formatCurrency(adminStats.totalArrecadado)}</h3>
+                      <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider mt-1">Pix Recebidos</p>
                     </div>
-                    <div className="size-12 md:size-14 rounded-full bg-amber-100 flex items-center justify-center text-amber-600">
-                      <Wallet className="size-6 md:size-8" />
+                    <div className="size-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
+                      <Wallet className="size-6" />
                     </div>
                   </div>
 
                   <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
                     <div>
-                      <p className="text-slate-500 text-sm font-medium">Total a Receber</p>
-                      <h3 className="text-2xl md:text-3xl font-black text-slate-900">{formatCurrency(adminStats.totalEsperado - adminStats.totalArrecadado)}</h3>
-                      <div className="flex items-center gap-1 text-blue-600 text-[10px] font-bold">
-                        <Clock className="size-3" />
-                        <span>Pendentes</span>
-                      </div>
+                      <p className="text-slate-500 text-sm font-medium">Receita Vendas</p>
+                      <h3 className="text-2xl font-black text-slate-900">{formatCurrency(adminStats.totalVendasExtras)}</h3>
+                      <p className="text-[10px] text-blue-600 font-bold uppercase tracking-wider mt-1">Bebidas/Comidas</p>
                     </div>
-                    <div className="size-12 md:size-14 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
-                      <Clock className="size-6 md:size-8" />
+                    <div className="size-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                      <ShoppingBag className="size-6" />
                     </div>
                   </div>
 
                   <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
-                    <div className="flex-1 mr-4">
-                      <p className="text-slate-500 text-sm font-medium">Ocupação do Evento</p>
-                      <h3 className="text-2xl md:text-3xl font-black text-slate-900">
-                        {adminStats.confirmedCount}
-                        <span className="text-slate-400 text-sm md:text-base font-medium ml-2">/ {adminStats.capacity} Confirmados (RSVP)</span>
+                    <div>
+                      <p className="text-slate-500 text-sm font-medium">Custo Total</p>
+                      <h3 className="text-2xl font-black text-slate-900">{formatCurrency(adminStats.totalCustos)}</h3>
+                      <p className="text-[10px] text-red-600 font-bold uppercase tracking-wider mt-1">Despesas</p>
+                    </div>
+                    <div className="size-12 rounded-full bg-red-100 flex items-center justify-center text-red-600">
+                      <DollarSign className="size-6" />
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+                    <div>
+                      <p className="text-slate-500 text-sm font-medium">Saldo Final</p>
+                      <h3 className={`text-2xl font-black ${adminStats.totalArrecadado + adminStats.totalVendasExtras - adminStats.totalCustos >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {formatCurrency(adminStats.totalArrecadado + adminStats.totalVendasExtras - adminStats.totalCustos)}
                       </h3>
-                      <div className="w-full bg-slate-100 h-2 rounded-full mt-2 overflow-hidden">
-                        <div 
-                          className={`h-full transition-all duration-500 ${adminStats.confirmedCount >= adminStats.capacity ? 'bg-red-500' : 'bg-blue-600'}`} 
-                          style={{ width: `${Math.min(100, (adminStats.confirmedCount / adminStats.capacity) * 100)}%` }}
-                        ></div>
-                      </div>
-                      <p className="text-[10px] text-slate-400 font-bold mt-2 uppercase tracking-widest">
-                        Total de Solicitações: {adminStats.totalRequests}
-                      </p>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">Lucro / Prejuízo</p>
                     </div>
-                    <div className="size-12 md:size-14 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
-                      <Users className="size-6 md:size-8" />
+                    <div className={`size-12 rounded-full flex items-center justify-center ${adminStats.totalArrecadado + adminStats.totalVendasExtras - adminStats.totalCustos >= 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
+                      {adminStats.totalArrecadado + adminStats.totalVendasExtras - adminStats.totalCustos >= 0 ? <CheckCircle className="size-6" /> : <AlertCircle className="size-6" />}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                  <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div className="px-6 py-5 border-b border-slate-200 flex items-center justify-between">
+                      <h4 className="font-bold text-slate-800">Distribuição Financeira</h4>
+                    </div>
+                    <div className="p-6 h-[350px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={[
+                              { name: 'Ingressos', value: adminStats.totalArrecadado },
+                              { name: 'Vendas Extras', value: adminStats.totalVendasExtras },
+                              { name: 'Custos', value: adminStats.totalCustos }
+                            ]}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={60}
+                            outerRadius={100}
+                            paddingAngle={5}
+                            dataKey="value"
+                          >
+                            <Cell fill="#10b981" />
+                            <Cell fill="#3b82f6" />
+                            <Cell fill="#ef4444" />
+                          </Pie>
+                          <Tooltip 
+                            formatter={(value: number) => formatCurrency(value)}
+                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                          />
+                          <Legend />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                    <div className="px-6 py-5 border-b border-slate-200">
+                      <h4 className="font-bold text-slate-800">Resumo de Caixa</h4>
+                    </div>
+                    <div className="p-6 flex-1 flex flex-col justify-center space-y-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 font-medium">Receita Ingressos</span>
+                        <span className="font-bold text-emerald-600">{formatCurrency(adminStats.totalArrecadado)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 font-medium">Receita Vendas</span>
+                        <span className="font-bold text-blue-600">{formatCurrency(adminStats.totalVendasExtras)}</span>
+                      </div>
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                        <span className="text-slate-900 font-bold">Receita Bruta</span>
+                        <span className="font-black text-slate-900">{formatCurrency(adminStats.totalArrecadado + adminStats.totalVendasExtras)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 font-medium">Custo Total</span>
+                        <span className="font-bold text-red-600">{formatCurrency(adminStats.totalCustos)}</span>
+                      </div>
+                      <div className="h-px bg-slate-100 w-full my-2"></div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-900 font-bold">Saldo Líquido</span>
+                        <span className={`text-xl font-black ${adminStats.totalArrecadado + adminStats.totalVendasExtras - adminStats.totalCustos >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {formatCurrency(adminStats.totalArrecadado + adminStats.totalVendasExtras - adminStats.totalCustos)}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -3161,6 +3584,16 @@ export default function App() {
                   </div>
                 </form>
               </div>
+            )}
+
+            {adminTab === 'costs' && adminStats && (
+              <CostsView 
+                costs={adminStats.custos || []} 
+                sales={adminStats.vendasExtras || []}
+                onSaveCosts={handleSaveCosts} 
+                onSaveSales={handleSaveSales}
+                onPrint={handlePrintCosts} 
+              />
             )}
 
             {adminTab === 'settings' && config && (
