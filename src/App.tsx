@@ -3762,40 +3762,18 @@ export default function App() {
                       onChange={(e: any) => setGuestFormData({...guestFormData, instagram: e.target.value})}
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Input 
-                      id="guest_value"
-                      name="value"
-                      label="Valor Convite (R$)" 
-                      icon={Wallet} 
-                      type="number"
-                      step="0.01"
-                      placeholder={config?.event.valor.toString()}
-                      value={guestFormData.valor_total}
-                      onChange={(e: any) => setGuestFormData({...guestFormData, valor_total: e.target.value})}
-                      required
-                    />
-                    <Input 
-                      id="guest_companions"
-                      name="companions"
-                      label="Qtd Acomp." 
-                      icon={Users} 
-                      type="number"
-                      min="0"
-                      max={config?.event.limite_acompanhantes || 4}
-                      value={guestFormData.acompanhantes_count || 0}
-                      onChange={(e: any) => {
-                        const val = parseInt(e.target.value) || 0;
-                        const limit = config?.event.limite_acompanhantes || 4;
-                        if (val > limit) {
-                          showToast(`O limite máximo de acompanhantes para este evento é ${limit}`, 'error');
-                          setGuestFormData({...guestFormData, acompanhantes_count: limit});
-                        } else {
-                          setGuestFormData({...guestFormData, acompanhantes_count: val});
-                        }
-                      }}
-                    />
-                  </div>
+                  <Input 
+                    id="guest_value"
+                    name="value"
+                    label="Valor Convite (R$)" 
+                    icon={Wallet} 
+                    type="number"
+                    step="0.01"
+                    placeholder={config?.event.valor.toString()}
+                    value={guestFormData.valor_total}
+                    onChange={(e: any) => setGuestFormData({...guestFormData, valor_total: e.target.value})}
+                    required
+                  />
                   {!editingGuest && (
                     <Input 
                       id="user_secure_password"
