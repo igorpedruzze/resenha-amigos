@@ -613,13 +613,12 @@ async function startServer() {
       return res.status(400).json({ error: "Nome, E-mail, WhatsApp e Senha são obrigatórios." });
     }
 
-    // Password complexity validation: min 6 chars, 1 letter, 5 numbers
+    // Password complexity validation: min 6 chars, 1 letter
     const hasLetter = /[a-zA-Z]/.test(password);
-    const digitCount = (password.match(/\d/g) || []).length;
 
-    if (password.length < 6 || !hasLetter || digitCount < 5) {
+    if (password.length < 6 || !hasLetter) {
       return res.status(400).json({ 
-        error: "A senha deve ter no mínimo 6 caracteres, contendo pelo menos 1 letra e 5 números." 
+        error: "A senha deve ter no mínimo 6 caracteres e conter pelo menos 1 letra." 
       });
     }
 
@@ -732,6 +731,14 @@ async function startServer() {
       
       if (!user) {
         return res.status(400).json({ error: "Token inválido ou expirado." });
+      }
+
+      // Password complexity validation: min 6 chars, 1 letter
+      const hasLetter = /[a-zA-Z]/.test(newPassword);
+      if (newPassword.length < 6 || !hasLetter) {
+        return res.status(400).json({ 
+          error: "A senha deve ter no mínimo 6 caracteres e conter pelo menos 1 letra." 
+        });
       }
 
       db.prepare("UPDATE usuarios SET senha_hash = ?, reset_token = NULL, reset_token_expires = NULL WHERE id = ?").run(newPassword, user.id);
@@ -1482,6 +1489,14 @@ async function startServer() {
 
     if (admin.senha_hash !== currentPassword) {
       return res.status(401).json({ error: "Senha atual incorreta" });
+    }
+
+    // Password complexity validation: min 6 chars, 1 letter
+    const hasLetter = /[a-zA-Z]/.test(newPassword);
+    if (newPassword.length < 6 || !hasLetter) {
+      return res.status(400).json({ 
+        error: "A senha deve ter no mínimo 6 caracteres e conter pelo menos 1 letra." 
+      });
     }
 
     try {

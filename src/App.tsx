@@ -524,6 +524,14 @@ export default function App() {
       setAuthError("As senhas não coincidem.");
       return;
     }
+
+    // Password complexity validation: min 6 chars, 1 letter
+    const hasLetter = /[a-zA-Z]/.test(resetPasswordForm.password);
+    if (resetPasswordForm.password.length < 6 || !hasLetter) {
+      setAuthError("A senha deve ter no mínimo 6 caracteres e conter pelo menos 1 letra.");
+      return;
+    }
+
     setLoading(true);
     setAuthError(null);
     try {
@@ -551,12 +559,11 @@ export default function App() {
     setLoading(true);
     setAuthError(null);
 
-    // Password complexity validation: min 6 chars, 1 letter, 5 numbers
+    // Password complexity validation: min 6 chars, 1 letter
     const hasLetter = /[a-zA-Z]/.test(signupData.password);
-    const digitCount = (signupData.password.match(/\d/g) || []).length;
 
-    if (signupData.password.length < 6 || !hasLetter || digitCount < 5) {
-      setAuthError("A senha deve ter no mínimo 6 caracteres, contendo pelo menos 1 letra e 5 números.");
+    if (signupData.password.length < 6 || !hasLetter) {
+      setAuthError("A senha deve ter no mínimo 6 caracteres e conter pelo menos 1 letra.");
       setLoading(false);
       return;
     }
@@ -980,6 +987,14 @@ export default function App() {
       showToast('As senhas não coincidem', 'error');
       return;
     }
+
+    // Password complexity validation: min 6 chars, 1 letter
+    const hasLetter = /[a-zA-Z]/.test(passwordForm.new);
+    if (passwordForm.new.length < 6 || !hasLetter) {
+      showToast('A senha deve ter no mínimo 6 caracteres e conter pelo menos 1 letra', 'error');
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch('/api/admin/change-password', {
