@@ -87,6 +87,7 @@ interface EventConfig {
   email_method?: 'smtp' | 'resend';
   resend_api_key?: string;
   from_email?: string;
+  system_url?: string;
 }
 
 interface OrganizerConfig {
@@ -213,7 +214,8 @@ export default function App() {
       capacidade_maxima: 50,
       email_method: 'smtp',
       resend_api_key: '',
-      from_email: ''
+      from_email: '',
+      system_url: ''
     },
     organizador: { nome: '', email: '', whatsapp: '' }
   });
@@ -2775,6 +2777,14 @@ export default function App() {
                           placeholder="E-mail, CPF, CNPJ ou Chave Aleatória"
                           value={configForm.event.pixKey}
                           onChange={(e: any) => setConfigForm({ ...configForm, event: { ...configForm.event, pixKey: e.target.value } })}
+                          required
+                        />
+                        <Input 
+                          label="URL do Sistema (Link Oficial)" 
+                          icon={Globe} 
+                          placeholder="https://sua-resenha.up.railway.app"
+                          value={configForm.event.system_url || ''}
+                          onChange={(e: any) => setConfigForm({ ...configForm, event: { ...configForm.event, system_url: e.target.value } })}
                           required
                         />
                       </div>

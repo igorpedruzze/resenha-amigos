@@ -69,7 +69,7 @@ const emailTemplate = (content: string, event: any) => `
     <div class="content">
       ${content}
       <div style="text-align: center; margin-top: 25px;">
-        <a href="${process.env.APP_URL || 'http://localhost:3000'}" class="btn">Acessar Painel</a>
+        <a href="${event.system_url || process.env.APP_URL || 'http://localhost:3000'}" class="btn">Acessar Painel</a>
       </div>
     </div>
     <div class="footer">
@@ -161,6 +161,7 @@ async function startServer() {
       email_method TEXT DEFAULT 'smtp',
       resend_api_key TEXT,
       from_email TEXT,
+      system_url TEXT,
       tpl_welcome TEXT,
       tpl_approval_guest TEXT,
       tpl_approval_companion TEXT,
@@ -308,6 +309,9 @@ async function startServer() {
 
   try {
     db.exec("ALTER TABLE eventos ADD COLUMN from_email TEXT");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE eventos ADD COLUMN system_url TEXT");
   } catch (e) {}
 
   db.exec(`
@@ -541,7 +545,8 @@ async function startServer() {
       '{nome_acomp}': data.acompanhante || '',
       '{saldo}': data.saldo || '',
       '{saldo_devedor}': data.saldo || '',
-      '{chave_pix}': data.chave_pix || ''
+      '{chave_pix}': data.chave_pix || '',
+      '{system_url}': data.system_url || data.link || ''
     };
 
     Object.entries(tags).forEach(([tag, value]) => {
@@ -640,7 +645,8 @@ async function startServer() {
           codigo_convidado: user.codigo_convidado,
           valor: defaultValue,
           evento: event.nome,
-          link: process.env.APP_URL || "http://localhost:3000"
+          link: event.system_url || process.env.APP_URL || "http://localhost:3000",
+          system_url: event.system_url || process.env.APP_URL || "http://localhost:3000"
         });
         sendEmail(email, `Solicitação Recebida - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
           if (success) addLog(user.id, user.nome, 'E-mail Enviado', `E-mail de boas-vindas enviado para ${email}.`);
@@ -695,7 +701,8 @@ async function startServer() {
 
       db.prepare("UPDATE usuarios SET reset_token = ?, reset_token_expires = ? WHERE id = ?").run(token, expires, user.id);
 
-      const resetLink = `${process.env.APP_URL || 'http://localhost:3000'}/reset-password?token=${token}`;
+      const baseUrl = event.system_url || process.env.APP_URL || 'http://localhost:3000';
+      const resetLink = `${baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl}/reset-password?token=${token}`;
       
       const template = getTemplate('email_password_recovery');
       const emailContent = parseTemplate(template, {
@@ -1256,7 +1263,8 @@ async function startServer() {
           codigo_convidado: guest.codigo_convidado,
           valor: guest.valor_total || event.valor_por_pessoa,
           evento: event.nome,
-          link: process.env.APP_URL || "http://localhost:3000"
+          link: event.system_url || process.env.APP_URL || "http://localhost:3000",
+          system_url: event.system_url || process.env.APP_URL || "http://localhost:3000"
         });
         sendEmail(guest.email, `Cadastro Aprovado! - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
           if (success) addLog(guest.id, guest.nome, 'E-mail Enviado', `E-mail de aprovação enviado para ${guest.email}.`);
@@ -1318,7 +1326,8 @@ async function startServer() {
         smtp_pass: event.smtp_pass || "",
         email_method: event.email_method || "smtp",
         resend_api_key: event.resend_api_key || "",
-        from_email: event.from_email || ""
+        from_email: event.from_email || "",
+        system_url: event.system_url || ""
       },
       organizador: {
         nome: admin.nome,
@@ -1353,7 +1362,8 @@ async function startServer() {
             smtp_pass = ?,
             email_method = ?,
             resend_api_key = ?,
-            from_email = ?
+            from_email = ?,
+            system_url = ?
           WHERE id = ?
         `).run(
           event.nome, 
@@ -1372,6 +1382,7 @@ async function startServer() {
           event.email_method,
           event.resend_api_key,
           event.from_email,
+          event.system_url,
           activeEvent.id
         );
 
