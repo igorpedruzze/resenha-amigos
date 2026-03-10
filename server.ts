@@ -993,7 +993,7 @@ async function startServer() {
     if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
     const userId = user.id;
 
-    const totalDue = user.valor_total !== null ? user.valor_total : event.valor_por_pessoa;
+    const totalDue = user.rsvp_status === 'desistente' ? 0 : (user.valor_total !== null ? user.valor_total : event.valor_por_pessoa);
     
     // Only count 'concluido' payments for balance
     const payments = db.prepare("SELECT SUM(valor) as total_paid FROM pagamentos WHERE usuario_id = ? AND evento_id = ? AND status = 'concluido'").get(userId, event.id);
@@ -1074,7 +1074,9 @@ async function startServer() {
       const companionsCount = db.prepare("SELECT COUNT(*) as count FROM acompanhantes WHERE usuario_id = ?").get(userId) as any;
       if (companionsCount.count > 0) {
         db.prepare("DELETE FROM acompanhantes WHERE usuario_id = ?").run(userId);
-        addLog(userId, user.nome, 'RSVP - Desistente (Limpou Acompanhantes)', `Informou que não poderá comparecer e removeu automaticamente ${companionsCount.count} acompanhante(s).`);
+        // Reset valor_total to single person value since companions are gone
+        db.prepare("UPDATE usuarios SET valor_total = ? WHERE id = ?").run(event.valor_por_pessoa, userId);
+        addLog(userId, user.nome, 'RSVP - Desistente (Limpou Acompanhantes)', `Informou que não poderá comparecer e removeu automaticamente ${companionsCount.count} acompanhante(s). Valor total resetado.`);
       } else {
         addLog(userId, user.nome, 'RSVP - Desistente', "Informou que não poderá comparecer");
       }
@@ -1580,7 +1582,7 @@ async function startServer() {
       return res.status(404).json({ error: "Nenhum evento ativo encontrado" });
     }
     const totalArrecadado = db.prepare("SELECT SUM(valor) as total FROM pagamentos WHERE evento_id = ? AND status = 'concluido'").get(event.id);
-    const totalEsperadoResult = db.prepare("SELECT SUM(COALESCE(valor_total, ?)) as total FROM usuarios WHERE role = 'guest' AND status = 'ativo'").get(event.valor_por_pessoa);
+    const totalEsperadoResult = db.prepare("SELECT SUM(COALESCE(valor_total, ?)) as total FROM usuarios WHERE role = 'guest' AND status = 'ativo' AND (rsvp_status IS NULL OR rsvp_status != 'desistente')").get(event.valor_por_pessoa);
     const totalEsperado = (totalEsperadoResult as any).total || 0;
 
     // RSVP Confirmed Stats

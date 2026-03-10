@@ -47,7 +47,8 @@ import {
   Info,
   Send,
   Camera,
-  AlertCircle
+  AlertCircle,
+  Copy
 } from 'lucide-react';
 
 // Types
@@ -286,6 +287,7 @@ export default function App() {
   const [loadingData, setLoadingData] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [companionDeleteConfirmId, setCompanionDeleteConfirmId] = useState<number | null>(null);
+  const [rsvpDeclineConfirm, setRsvpDeclineConfirm] = useState(false);
   const [rejectConfirmId, setRejectConfirmId] = useState<number | null>(null);
   const [rejectGuestConfirmId, setRejectGuestConfirmId] = useState<number | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -406,11 +408,10 @@ export default function App() {
   const handleRSVP = async (action: 'confirm' | 'decline') => {
     if (!user) return;
 
-    if (action === 'decline' && companions.length > 0) {
-      const confirmDecline = window.confirm(
-        `Atenção: Você possui ${companions.length} acompanhante(s) cadastrado(s). \n\nAo confirmar sua desistência, TODOS os seus acompanhantes serão removidos automaticamente para liberar as vagas no evento. \n\nDeseja continuar?`
-      );
-      if (!confirmDecline) return;
+    if (action === 'decline' && !rsvpDeclineConfirm) {
+      setRsvpDeclineConfirm(true);
+      setTimeout(() => setRsvpDeclineConfirm(false), 5000);
+      return;
     }
 
     setLoading(true);
@@ -429,6 +430,7 @@ export default function App() {
           setUser({ ...user, rsvp_status: data.status });
         }
         
+        setRsvpDeclineConfirm(false);
         fetchMe();
         fetchPublicEvent();
         if (action === 'decline') fetchCompanions(); // Refresh companions list after auto-removal
@@ -440,6 +442,15 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleCopyPix = (key: string) => {
+    if (!key) return;
+    navigator.clipboard.writeText(key).then(() => {
+      showToast('Chave Pix copiada!', 'success');
+    }).catch(() => {
+      showToast('Erro ao copiar chave Pix', 'error');
+    });
   };
 
   const handleLogout = () => {
@@ -1761,13 +1772,25 @@ export default function App() {
                           <button 
                             onClick={() => handleRSVP('decline')}
                             disabled={loading}
-                            className="flex-1 bg-blue-700/50 hover:bg-blue-700 text-white font-black py-4 rounded-2xl transition-all border border-white/20 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
+                            className={`flex-1 font-black py-4 rounded-2xl transition-all border flex items-center justify-center gap-2 uppercase tracking-widest text-xs ${
+                              rsvpDeclineConfirm 
+                                ? 'bg-red-600 border-red-500 text-white animate-pulse' 
+                                : 'bg-blue-700/50 hover:bg-blue-700 text-white border-white/20'
+                            }`}
                           >
-                            {user.rsvp_status === 'confirmado' ? 'Não poderei ir mais' : 'Desistir da Vaga'}
-                            <X className="size-5" />
+                            {rsvpDeclineConfirm 
+                              ? 'Confirmar Desistência?' 
+                              : (user.rsvp_status === 'confirmado' ? 'Não poderei ir mais' : 'Desistir da Vaga')}
+                            {rsvpDeclineConfirm ? <Trash2 className="size-5" /> : <X className="size-5" />}
                           </button>
                         )}
                       </div>
+                      
+                      {rsvpDeclineConfirm && (
+                        <p className="text-[10px] font-bold text-red-200 text-center animate-bounce">
+                          ⚠️ Tem certeza? {companions.length > 0 && `Seus ${companions.length} acompanhantes também serão removidos!`}
+                        </p>
+                      )}
                       
                       {/* Dynamic status message below buttons */}
                       <p className="text-[10px] md:text-xs font-bold text-white/70 italic text-center md:text-left">
@@ -1849,9 +1872,12 @@ export default function App() {
 
             {/* Bloco de Chave Pix */}
             {balance.pixKey && !isPaid && (
-              <div className="bg-blue-600 rounded-3xl p-6 md:p-8 shadow-lg shadow-blue-600/20 text-white flex flex-col md:flex-row items-center justify-between gap-6">
+              <button 
+                onClick={() => handleCopyPix(balance.pixKey)}
+                className="w-full bg-blue-600 rounded-3xl p-6 md:p-8 shadow-lg shadow-blue-600/20 text-white flex flex-col md:flex-row items-center justify-between gap-6 hover:bg-blue-700 transition-all active:scale-[0.98] group text-left"
+              >
                 <div className="flex items-center gap-4">
-                  <div className="size-12 rounded-2xl bg-white/20 flex items-center justify-center">
+                  <div className="size-12 rounded-2xl bg-white/20 flex items-center justify-center group-hover:bg-white/30 transition-colors">
                     <QrCode className="size-6 text-white" />
                   </div>
                   <div>
@@ -1859,10 +1885,11 @@ export default function App() {
                     <h4 className="text-xl md:text-2xl font-mono font-black select-all break-all">{balance.pixKey}</h4>
                   </div>
                 </div>
-                <div className="bg-white/10 backdrop-blur-sm px-4 py-2 rounded-xl border border-white/20">
+                <div className="bg-white/10 backdrop-blur-sm px-4 py-2 rounded-xl border border-white/20 flex items-center gap-2 group-hover:bg-white/20 transition-colors">
+                  <Copy className="size-3 text-blue-100" />
                   <p className="text-[10px] text-blue-50 font-medium italic">Copie a chave e faça o Pix de qualquer valor para abater seu saldo.</p>
                 </div>
-              </div>
+              </button>
             )}
           </div>
 
@@ -2385,7 +2412,8 @@ export default function App() {
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {adminStats.guests.filter(g => g.status === 'ativo').map((g) => {
-                          const totalDue = g.valor_total !== undefined && g.valor_total !== null ? g.valor_total : ((adminStats as any).eventValue || 500);
+                          const baseTotalDue = g.valor_total !== undefined && g.valor_total !== null ? g.valor_total : ((adminStats as any).eventValue || 500);
+                          const totalDue = g.rsvp_status === 'desistente' ? 0 : baseTotalDue;
                           const paid = g.paid || 0;
                           const status = paid >= totalDue ? 'QUITADO' : paid > 0 ? 'PARCIAL' : 'PENDENTE';
                           const statusColor = status === 'QUITADO' ? 'bg-emerald-100 text-emerald-600' : status === 'PARCIAL' ? 'bg-amber-100 text-amber-600' : 'bg-red-100 text-red-600';
@@ -2752,7 +2780,8 @@ export default function App() {
                         }).map((g) => {
                           const guestStats = adminStats?.guests.find(as => as.id === g.id);
                           const paid = guestStats?.paid || 0;
-                          const totalDue = g.valor_total !== undefined && g.valor_total !== null ? g.valor_total : (adminStats?.eventValue || 500);
+                          const baseTotalDue = g.valor_total !== undefined && g.valor_total !== null ? g.valor_total : (adminStats?.eventValue || 500);
+                          const totalDue = g.rsvp_status === 'desistente' ? 0 : baseTotalDue;
                           const amountDue = totalDue - paid;
                           
                           return (
