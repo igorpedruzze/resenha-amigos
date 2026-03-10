@@ -89,6 +89,8 @@ interface EventConfig {
   resend_api_key?: string;
   from_email?: string;
   system_url?: string;
+  info_texto?: string;
+  flyer_info?: string;
 }
 
 interface OrganizerConfig {
@@ -120,6 +122,8 @@ interface BalanceData {
   balance: number;
   history: Payment[];
   pixKey?: string;
+  info_texto?: string;
+  flyer_info?: string;
 }
 
 interface AdminStats {
@@ -217,7 +221,9 @@ export default function App() {
       email_method: 'smtp',
       resend_api_key: '',
       from_email: '',
-      system_url: ''
+      system_url: '',
+      info_texto: '',
+      flyer_info: ''
     },
     organizador: { nome: '', email: '', whatsapp: '' }
   });
@@ -1048,7 +1054,7 @@ export default function App() {
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'flyer_landing' | 'flyer_landing_mobile' | 'flyer_dashboard') => {
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'flyer_landing' | 'flyer_landing_mobile' | 'flyer_dashboard' | 'flyer_info') => {
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 5 * 1024 * 1024) {
@@ -1501,6 +1507,35 @@ export default function App() {
                 <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tighter">Pago</p>
               </div>
             </div>
+
+            {/* Informações do Evento */}
+            {(balance.flyer_info || balance.info_texto) && (
+              <div className="bg-white rounded-3xl overflow-hidden border border-slate-100 shadow-sm animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="p-4 md:p-6 bg-slate-50/50 border-b border-slate-100 flex items-center gap-3">
+                  <Info className="size-5 text-blue-600" />
+                  <h4 className="font-black text-xs md:text-sm text-slate-900 uppercase tracking-widest">Informações da Resenha</h4>
+                </div>
+                <div className="p-0">
+                  {balance.flyer_info && (
+                    <div className="w-full">
+                      <img 
+                        src={balance.flyer_info} 
+                        alt="Flyer do Evento" 
+                        className="w-full h-auto block"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                  )}
+                  {balance.info_texto && (
+                    <div className="p-6 md:p-8">
+                      <p className="text-slate-600 text-sm md:text-base leading-relaxed whitespace-pre-wrap font-medium">
+                        {balance.info_texto}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Bloco de Chave Pix */}
             {balance.pixKey && (
@@ -2951,6 +2986,15 @@ export default function App() {
                           onChange={(e: any) => setConfigForm({ ...configForm, event: { ...configForm.event, system_url: e.target.value } })}
                           required
                         />
+                        <div className="space-y-3">
+                          <label className="text-sm font-black text-slate-700 uppercase tracking-widest ml-1">Informações da Resenha (Avisos/Detalhes)</label>
+                          <textarea 
+                            className="w-full p-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none font-medium text-sm min-h-[120px]"
+                            placeholder="Digite aqui avisos, regras ou detalhes importantes do evento..."
+                            value={configForm.event.info_texto || ''}
+                            onChange={(e: any) => setConfigForm({ ...configForm, event: { ...configForm.event, info_texto: e.target.value } })}
+                          />
+                        </div>
                       </div>
 
                       <div className="space-y-8">
@@ -3042,6 +3086,37 @@ export default function App() {
                                 <Upload className="size-10 text-slate-300" />
                                 <span className="text-xs font-bold text-slate-400 uppercase tracking-widest text-center px-4">Upload Flyer Dashboard</span>
                                 <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, 'flyer_dashboard')} />
+                              </label>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Flyer Informativo */}
+                        <div className="space-y-3">
+                          <label className="text-sm font-black text-slate-700 uppercase tracking-widest ml-1">Flyer Informativo (Arte do Evento)</label>
+                          <div className="relative group w-full rounded-2xl bg-slate-50 border-2 border-dashed border-slate-200 overflow-hidden flex flex-col items-center justify-center hover:border-blue-400 transition-all min-h-[200px]">
+                            {configForm.event.flyer_info ? (
+                              <>
+                                <img src={configForm.event.flyer_info} alt="Prévia Informativo" className="max-w-full h-auto block" />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
+                                  <label className="cursor-pointer bg-white text-slate-900 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest hover:scale-105 transition-transform">
+                                    Alterar
+                                    <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, 'flyer_info')} />
+                                  </label>
+                                  <button 
+                                    type="button"
+                                    onClick={() => setConfigForm(prev => ({ ...prev, event: { ...prev.event, flyer_info: '' } }))}
+                                    className="bg-red-500 text-white px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest hover:scale-105 transition-transform"
+                                  >
+                                    Remover
+                                  </button>
+                                </div>
+                              </>
+                            ) : (
+                              <label className="cursor-pointer flex flex-col items-center gap-3 py-10">
+                                <Upload className="size-10 text-slate-300" />
+                                <span className="text-xs font-bold text-slate-400 uppercase tracking-widest text-center px-4">Upload Flyer Informativo</span>
+                                <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(e, 'flyer_info')} />
                               </label>
                             )}
                           </div>

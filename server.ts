@@ -189,6 +189,8 @@ async function startServer() {
       resend_api_key TEXT,
       from_email TEXT,
       system_url TEXT,
+      info_texto TEXT,
+      flyer_info TEXT,
       tpl_welcome TEXT,
       tpl_approval_guest TEXT,
       tpl_approval_companion TEXT,
@@ -339,6 +341,12 @@ async function startServer() {
   } catch (e) {}
   try {
     db.exec("ALTER TABLE eventos ADD COLUMN system_url TEXT");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE eventos ADD COLUMN info_texto TEXT");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE eventos ADD COLUMN flyer_info TEXT");
   } catch (e) {}
 
   db.exec(`
@@ -872,7 +880,9 @@ async function startServer() {
       totalPaid,
       balance,
       history,
-      pixKey: event.pix_key
+      pixKey: event.pix_key,
+      info_texto: event.info_texto || "",
+      flyer_info: event.flyer_info || ""
     });
   });
 
@@ -1465,7 +1475,9 @@ async function startServer() {
         email_method: event.email_method || "smtp",
         resend_api_key: event.resend_api_key || "",
         from_email: event.from_email || "",
-        system_url: event.system_url || ""
+        system_url: event.system_url || "",
+        info_texto: event.info_texto || "",
+        flyer_info: event.flyer_info || ""
       },
       organizador: {
         nome: admin.nome,
@@ -1484,6 +1496,7 @@ async function startServer() {
     const flyerLanding = saveBase64Image(event.flyer_landing, 'flyer_landing');
     const flyerLandingMobile = saveBase64Image(event.flyer_landing_mobile, 'flyer_landing_mobile');
     const flyerDashboard = saveBase64Image(event.flyer_dashboard, 'flyer_dashboard');
+    const flyerInfo = saveBase64Image(event.flyer_info, 'flyer_info');
 
     try {
       db.transaction(() => {
@@ -1497,6 +1510,8 @@ async function startServer() {
             flyer_landing = ?,
             flyer_landing_mobile = ?,
             flyer_dashboard = ?,
+            flyer_info = ?,
+            info_texto = ?,
             capacidade_maxima = ?,
             smtp_host = ?,
             smtp_port = ?,
@@ -1516,6 +1531,8 @@ async function startServer() {
           flyerLanding, 
           flyerLandingMobile,
           flyerDashboard, 
+          flyerInfo,
+          event.info_texto,
           event.capacidade_maxima,
           event.smtp_host,
           event.smtp_port,
