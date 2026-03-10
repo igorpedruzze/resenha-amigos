@@ -11,7 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Ensure database directory exists
-const dbDir = path.join(__dirname, "database");
+const dbDir = process.env.DB_PATH || path.join(__dirname, "database");
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
@@ -82,7 +82,7 @@ const emailTemplate = (content: string, event: any) => `
 
 async function startServer() {
   console.log("Initializing database...");
-  const dbDir = path.join(__dirname, "database");
+  const dbDir = process.env.DB_PATH || path.join(__dirname, "database");
   const dbPath = path.join(dbDir, "eventpro.db");
   const db = new Database(dbPath);
   const SETTINGS_FILE = path.join(dbDir, "settings.json");
