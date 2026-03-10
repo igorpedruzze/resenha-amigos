@@ -1434,44 +1434,6 @@ export default function App() {
                     />
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="text-sm font-black text-slate-700 uppercase tracking-widest ml-1">Quantidade de Acompanhantes</label>
-                    <div className="relative">
-                      <Users className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 size-5" />
-                      <input 
-                        type="number"
-                        min="0"
-                        max={publicEvent?.limite_acompanhantes || 4}
-                        value={signupData.companionsCount}
-                        onChange={(e: any) => {
-                          const val = parseInt(e.target.value) || 0;
-                          const limit = publicEvent?.limite_acompanhantes || 4;
-                          if (val > limit) {
-                            showToast(`O limite máximo de acompanhantes para este evento é ${limit}`, 'error');
-                            setSignupData({...signupData, companionsCount: limit});
-                          } else {
-                            setSignupData({...signupData, companionsCount: val});
-                          }
-                        }}
-                        className="w-full pl-12 pr-4 py-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none font-bold text-base"
-                      />
-                    </div>
-                    <p className="text-[10px] text-slate-400 font-medium ml-1">Máximo permitido: {publicEvent?.limite_acompanhantes || 4}</p>
-                  </div>
-
-                  <div className="bg-blue-600/5 p-4 rounded-2xl border border-blue-600/10 flex items-center justify-between">
-                    <div>
-                      <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Valor Total do Convite</p>
-                      <p className="text-2xl font-black text-slate-900">
-                        {formatCurrency((publicEvent?.valor || 0) * (1 + signupData.companionsCount))}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Pessoas</p>
-                      <p className="font-bold text-slate-700">{1 + signupData.companionsCount}</p>
-                    </div>
-                  </div>
-
                   <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 mb-2">
                     <div className="flex items-start gap-2">
                       <Info className="size-4 text-blue-600 mt-0.5 shrink-0" />
@@ -1518,7 +1480,7 @@ export default function App() {
                     disabled={loading}
                     className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black uppercase tracking-widest py-4 rounded-2xl transition-all shadow-xl shadow-blue-600/20 disabled:opacity-50 flex items-center justify-center gap-2"
                   >
-                    {loading ? 'Processando...' : 'Confirmar Presença'}
+                    {loading ? 'Processando...' : 'PRÉ CADASTRO'}
                     <ArrowRight className="size-5" />
                   </button>
                 </form>
