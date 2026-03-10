@@ -274,6 +274,7 @@ export default function App() {
     flyer_dashboard?: string,
     limite_acompanhantes?: number,
     admin_foto?: string,
+    admin_whatsapp?: string,
     prazo_rsvp?: string,
     capacidade_maxima?: number,
     ocupacao_atual?: number
@@ -408,10 +409,33 @@ export default function App() {
   const handleRSVP = async (action: 'confirm' | 'decline') => {
     if (!user) return;
 
-    if (action === 'decline' && !rsvpDeclineConfirm) {
-      setRsvpDeclineConfirm(true);
-      setTimeout(() => setRsvpDeclineConfirm(false), 5000);
-      return;
+    if (action === 'decline') {
+      if (balance && balance.totalPaid > 0) {
+        const adminPhone = publicEvent?.admin_whatsapp?.replace(/\D/g, '') || '';
+        const waLink = `https://wa.me/${adminPhone.length <= 11 ? '55' + adminPhone : adminPhone}?text=Olá! Gostaria de solicitar a desistência do evento, mas já efetuei um pagamento.`;
+        
+        showToast(
+          <div className="flex flex-col gap-2">
+            <span>Não é possível desistir pelo painel pois você já possui pagamentos realizados.</span>
+            <a 
+              href={waLink} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="bg-emerald-500 text-white px-3 py-1 rounded-lg text-center font-bold flex items-center justify-center gap-2 hover:bg-emerald-600 transition-colors"
+            >
+              Falar com Organizador <ExternalLink className="size-3" />
+            </a>
+          </div>, 
+          'error'
+        );
+        return;
+      }
+
+      if (!rsvpDeclineConfirm) {
+        setRsvpDeclineConfirm(true);
+        setTimeout(() => setRsvpDeclineConfirm(false), 5000);
+        return;
+      }
     }
 
     setLoading(true);
@@ -1633,8 +1657,9 @@ export default function App() {
   }
 
   if (view === 'dashboard' && user && balance) {
-    const progress = (balance.totalPaid / balance.totalDue) * 100;
-    const isPaid = balance.balance <= 0;
+    const progress = balance.totalDue > 0 ? (balance.totalPaid / balance.totalDue) * 100 : (balance.totalPaid > 0 ? 100 : 0);
+    const isPaid = balance.balance <= 0 && balance.totalDue > 0;
+    const hasDeclined = user.rsvp_status === 'desistente';
     
     const rsvpDeadlinePassed = publicEvent?.prazo_rsvp ? new Date() > new Date(publicEvent.prazo_rsvp) : false;
     const showRSVP = user.status === 'ativo';
@@ -1775,13 +1800,15 @@ export default function App() {
                             className={`flex-1 font-black py-4 rounded-2xl transition-all border flex items-center justify-center gap-2 uppercase tracking-widest text-xs ${
                               rsvpDeclineConfirm 
                                 ? 'bg-red-600 border-red-500 text-white animate-pulse' 
-                                : 'bg-blue-700/50 hover:bg-blue-700 text-white border-white/20'
+                                : (balance && balance.totalPaid > 0)
+                                  ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                                  : 'bg-blue-700/50 hover:bg-blue-700 text-white border-white/20'
                             }`}
                           >
                             {rsvpDeclineConfirm 
                               ? 'Confirmar Desistência?' 
                               : (user.rsvp_status === 'confirmado' ? 'Não poderei ir mais' : 'Desistir da Vaga')}
-                            {rsvpDeclineConfirm ? <Trash2 className="size-5" /> : <X className="size-5" />}
+                            {rsvpDeclineConfirm ? <Trash2 className="size-5" /> : (balance && balance.totalPaid > 0 ? <Lock className="size-5" /> : <X className="size-5" />)}
                           </button>
                         )}
                       </div>
@@ -1789,6 +1816,12 @@ export default function App() {
                       {rsvpDeclineConfirm && (
                         <p className="text-[10px] font-bold text-red-200 text-center animate-bounce">
                           ⚠️ Tem certeza? {companions.length > 0 && `Seus ${companions.length} acompanhantes também serão removidos!`}
+                        </p>
+                      )}
+
+                      {balance && balance.totalPaid > 0 && user.rsvp_status !== 'desistente' && (
+                        <p className="text-[10px] font-bold text-blue-200/80 text-center">
+                          ℹ️ Pagamento detectado. Para desistir, entre em contato com o organizador.
                         </p>
                       )}
                       
@@ -1814,8 +1847,8 @@ export default function App() {
                 ></div>
                 <div>
                   <p className="text-slate-400 text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1">Status Financeiro</p>
-                  <h3 className={`text-2xl md:text-3xl font-black ${isPaid ? 'text-emerald-600' : 'text-slate-900'}`}>
-                    {isPaid ? 'Pagamento Confirmado!' : `Saldo Devedor: ${formatCurrency(balance.balance)}`}
+                  <h3 className={`text-2xl md:text-3xl font-black ${hasDeclined ? 'text-slate-400' : isPaid ? 'text-emerald-600' : 'text-slate-900'}`}>
+                    {hasDeclined ? 'Inativo (Desistente)' : isPaid ? 'Pagamento Confirmado!' : `Saldo Devedor: ${formatCurrency(balance.balance)}`}
                   </h3>
                   <div className="mt-2">
                     <p className="text-xs text-slate-500">{formatCurrency(balance.totalPaid)} de {formatCurrency(balance.totalDue)} pagos</p>
@@ -1823,20 +1856,26 @@ export default function App() {
                       <motion.div 
                         initial={{ width: 0 }}
                         animate={{ width: `${progress}%` }}
-                        className={`h-full ${isPaid ? 'bg-emerald-500' : 'bg-amber-400'} rounded-full`}
+                        className={`h-full ${hasDeclined ? 'bg-slate-300' : isPaid ? 'bg-emerald-500' : 'bg-amber-400'} rounded-full`}
                       />
                     </div>
-                    {isPaid && (
+                    {isPaid && !hasDeclined && (
                       <p className="text-[10px] md:text-xs text-emerald-600 font-bold mt-2 flex items-center gap-1">
                         <CheckCircle className="size-3" />
                         Sua presença na Resenha está confirmada. Nos vemos lá!
+                      </p>
+                    )}
+                    {hasDeclined && (
+                      <p className="text-[10px] md:text-xs text-slate-500 font-bold mt-2 flex items-center gap-1">
+                        <XCircle className="size-3" />
+                        Você informou que não poderá participar.
                       </p>
                     )}
                   </div>
                 </div>
               </div>
               <div className="text-right hidden md:block">
-                <span className={`${isPaid ? 'text-emerald-500' : 'text-amber-500'} font-black text-4xl`}>{Math.round(progress)}%</span>
+                <span className={`${hasDeclined ? 'text-slate-400' : isPaid ? 'text-emerald-500' : 'text-amber-500'} font-black text-4xl`}>{Math.round(progress)}%</span>
                 <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tighter">Pago</p>
               </div>
             </div>

@@ -741,7 +741,7 @@ async function startServer() {
     const event = getActiveEvent();
     if (!event) return res.status(404).json({ error: "Evento não encontrado" });
     
-    const admin = db.prepare("SELECT foto_perfil FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
+    const admin = db.prepare("SELECT foto_perfil, whatsapp FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
     
     res.json({
       nome: event.nome,
@@ -754,6 +754,7 @@ async function startServer() {
       limite_acompanhantes: event.limite_acompanhantes || 4,
       prazo_rsvp: event.prazo_rsvp,
       admin_foto: admin?.foto_perfil || null,
+      admin_whatsapp: admin?.whatsapp || null,
       capacidade_maxima: event.capacidade_maxima || 50,
       ocupacao_atual: getCurrentOccupancy()
     });
