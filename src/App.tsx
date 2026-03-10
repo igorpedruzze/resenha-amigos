@@ -1448,25 +1448,25 @@ export default function App() {
               ) : (
                 <form onSubmit={handleLogin} method="POST" className="space-y-5">
                   <Input 
-                    id="login_email"
-                    name="email"
+                    id="auth_email_address"
+                    name="auth_email_address"
                     label="E-mail" 
                     icon={Mail} 
                     type="email"
-                    autoComplete="email"
+                    autoComplete="username email"
                     placeholder="seu@email.com"
                     value={loginData.email}
                     onChange={(e: any) => setLoginData({...loginData, email: e.target.value})}
                     required
                   />
                   <Input 
-                    id="user_secure_password"
-                    name="user_secure_password"
+                    id="auth_user_password"
+                    name="auth_user_password"
                     label="Senha" 
                     icon={Lock} 
                     type="password"
                     autoComplete="current-password"
-                    placeholder="Sua senha de acesso"
+                    placeholder="Digite sua senha"
                     value={loginData.password}
                     onChange={(e: any) => setLoginData({...loginData, password: e.target.value})}
                     required
@@ -1509,6 +1509,11 @@ export default function App() {
 
   if (view === 'dashboard' && user && balance) {
     const progress = (balance.totalPaid / balance.totalDue) * 100;
+    const isPaid = balance.balance <= 0;
+    
+    const PENDING_IMAGE = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?q=80&w=1000&auto=format&fit=crop";
+    const PAID_IMAGE = "https://images.unsplash.com/photo-1513151233558-d860c5398176?q=80&w=1000&auto=format&fit=crop";
+
     return (
       <div className="min-h-screen bg-slate-50 font-sans">
         {/* Toast Notification */}
@@ -1570,25 +1575,33 @@ export default function App() {
               <div className="flex items-center gap-6 w-full md:w-auto">
                 <div 
                   className="w-24 h-16 md:w-28 md:h-20 rounded-2xl bg-cover bg-center shrink-0 shadow-inner border border-slate-100" 
-                  style={{ backgroundImage: `url(${publicEvent?.flyer_dashboard || 'https://picsum.photos/seed/party/600/600'})` }}
+                  style={{ backgroundImage: `url(${publicEvent?.flyer_dashboard || (isPaid ? PAID_IMAGE : PENDING_IMAGE)})` }}
                 ></div>
                 <div>
                   <p className="text-slate-400 text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1">Status Financeiro</p>
-                  <h3 className="text-2xl md:text-3xl font-black text-slate-900">Saldo Devedor: {formatCurrency(balance.balance)}</h3>
+                  <h3 className={`text-2xl md:text-3xl font-black ${isPaid ? 'text-emerald-600' : 'text-slate-900'}`}>
+                    {isPaid ? 'Pagamento Confirmado!' : `Saldo Devedor: ${formatCurrency(balance.balance)}`}
+                  </h3>
                   <div className="mt-2">
                     <p className="text-xs text-slate-500">{formatCurrency(balance.totalPaid)} de {formatCurrency(balance.totalDue)} pagos</p>
                     <div className="w-48 bg-slate-100 h-1.5 rounded-full mt-1 overflow-hidden">
                       <motion.div 
                         initial={{ width: 0 }}
                         animate={{ width: `${progress}%` }}
-                        className="h-full bg-amber-400 rounded-full"
+                        className={`h-full ${isPaid ? 'bg-emerald-500' : 'bg-amber-400'} rounded-full`}
                       />
                     </div>
+                    {isPaid && (
+                      <p className="text-[10px] md:text-xs text-emerald-600 font-bold mt-2 flex items-center gap-1">
+                        <CheckCircle className="size-3" />
+                        Sua presença na Resenha está confirmada. Nos vemos lá!
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
               <div className="text-right hidden md:block">
-                <span className="text-amber-500 font-black text-4xl">{Math.round(progress)}%</span>
+                <span className={`${isPaid ? 'text-emerald-500' : 'text-amber-500'} font-black text-4xl`}>{Math.round(progress)}%</span>
                 <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tighter">Pago</p>
               </div>
             </div>
@@ -1623,7 +1636,7 @@ export default function App() {
             )}
 
             {/* Bloco de Chave Pix */}
-            {balance.pixKey && (
+            {balance.pixKey && !isPaid && (
               <div className="bg-blue-600 rounded-3xl p-6 md:p-8 shadow-lg shadow-blue-600/20 text-white flex flex-col md:flex-row items-center justify-between gap-6">
                 <div className="flex items-center gap-4">
                   <div className="size-12 rounded-2xl bg-white/20 flex items-center justify-center">
