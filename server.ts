@@ -1364,7 +1364,7 @@ async function startServer() {
   });
 
   app.post("/api/admin/guests", (req, res) => {
-    let { nome, email, whatsapp, instagram, password, valor_total, acompanhantes_count } = req.body;
+    let { nome, email, whatsapp, instagram, password, valor_total, acompanhantes_count, rsvp_status } = req.body;
     
     nome = sanitize(nome);
     email = sanitize(email);
@@ -1380,8 +1380,8 @@ async function startServer() {
       const salt = bcrypt.genSaltSync(10);
       const hash = bcrypt.hashSync(password || '123456', salt);
       const result = db.prepare(
-        "INSERT INTO usuarios (nome, email, whatsapp, instagram, senha_hash, role, valor_total, codigo_convidado, acompanhantes_count) VALUES (?, ?, ?, ?, ?, 'guest', ?, ?, ?)"
-      ).run(nome, email, whatsapp, instagram, hash, finalValue, guestCode, count);
+        "INSERT INTO usuarios (nome, email, whatsapp, instagram, senha_hash, role, valor_total, codigo_convidado, acompanhantes_count, rsvp_status) VALUES (?, ?, ?, ?, ?, 'guest', ?, ?, ?, ?)"
+      ).run(nome, email, whatsapp, instagram, hash, finalValue, guestCode, count, rsvp_status || null);
       const guest = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(result.lastInsertRowid) as any;
       const admin = db.prepare("SELECT nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
       addLog(admin?.id || null, admin?.nome || 'Adm', 'Criação de Convidado', `Adm ${admin?.nome} cadastrou o convidado ${nome} com valor de R$ ${finalValue}.`);
@@ -1392,13 +1392,13 @@ async function startServer() {
   });
 
   app.put("/api/admin/guests/:id", (req, res) => {
-    const { nome, email, whatsapp, instagram, valor_total, acompanhantes_count } = req.body;
+    const { nome, email, whatsapp, instagram, valor_total, acompanhantes_count, rsvp_status } = req.body;
     const { id } = req.params;
     try {
       const oldGuest = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(id) as any;
       db.prepare(
-        "UPDATE usuarios SET nome = ?, email = ?, whatsapp = ?, instagram = ?, valor_total = ?, acompanhantes_count = ? WHERE id = ?"
-      ).run(nome, email, whatsapp, instagram, valor_total, acompanhantes_count, id);
+        "UPDATE usuarios SET nome = ?, email = ?, whatsapp = ?, instagram = ?, valor_total = ?, acompanhantes_count = ?, rsvp_status = ? WHERE id = ?"
+      ).run(nome, email, whatsapp, instagram, valor_total, acompanhantes_count, rsvp_status, id);
       
       const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
       let msg = `Adm ${admin?.nome} alterou dados de ${nome}.`;

@@ -303,7 +303,8 @@ export default function App() {
     instagram: '',
     password: '',
     valor_total: '',
-    acompanhantes_count: 0
+    acompanhantes_count: 0,
+    rsvp_status: ''
   });
   const [logSearchId, setLogSearchId] = useState('');
   const [adminPixInput, setAdminPixInput] = useState('');
@@ -1025,7 +1026,7 @@ export default function App() {
       fetchAdminStats(); // Refresh stats too
       setShowGuestForm(false);
       setEditingGuest(null);
-      setGuestFormData({ nome: '', email: '', whatsapp: '', instagram: '', password: '', valor_total: '', acompanhantes_count: 0 });
+      setGuestFormData({ nome: '', email: '', whatsapp: '', instagram: '', password: '', valor_total: '', acompanhantes_count: 0, rsvp_status: '' });
     } else {
       const data = await res.json();
       showToast(data.error || 'Erro ao salvar convidado', 'error');
@@ -1609,7 +1610,7 @@ export default function App() {
     const isPaid = balance.balance <= 0;
     
     const rsvpDeadlinePassed = publicEvent?.prazo_rsvp ? new Date() > new Date(publicEvent.prazo_rsvp) : false;
-    const showRSVP = user.status === 'ativo' && !user.rsvp_status;
+    const showRSVP = user.status === 'ativo';
     const isSoldOut = publicEvent && publicEvent.ocupacao_atual !== undefined && publicEvent.capacidade_maxima !== undefined && publicEvent.ocupacao_atual >= publicEvent.capacidade_maxima;
     
     const PENDING_IMAGE = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?q=80&w=1000&auto=format&fit=crop";
@@ -1694,37 +1695,56 @@ export default function App() {
                     <h3 className="text-xl md:text-2xl font-black uppercase tracking-tight">Confirmação de Presença</h3>
                   </div>
                   <p className="text-blue-100 text-sm md:text-base mb-6 max-w-xl">
-                    Sua vaga está reservada! Clique abaixo para confirmar sua presença ou liberar para outra pessoa.
+                    {user.rsvp_status === 'confirmado' ? (
+                      <span className="flex items-center gap-2 font-black text-white bg-emerald-500/30 px-3 py-1 rounded-lg w-fit mb-2">
+                        <CheckCircle className="size-5" /> VOCÊ ESTÁ CONFIRMADO!
+                      </span>
+                    ) : user.rsvp_status === 'desistente' ? (
+                      <span className="flex items-center gap-2 font-black text-white bg-red-500/30 px-3 py-1 rounded-lg w-fit mb-2">
+                        <XCircle className="size-5" /> VOCÊ INFORMOU QUE NÃO PODERÁ IR.
+                      </span>
+                    ) : user.rsvp_status === 'lista_espera' ? (
+                      <span className="flex items-center gap-2 font-black text-white bg-amber-500/30 px-3 py-1 rounded-lg w-fit mb-2">
+                        <Clock className="size-5" /> VOCÊ ESTÁ NA LISTA DE ESPERA.
+                      </span>
+                    ) : (
+                      "Sua vaga está reservada! Clique abaixo para confirmar sua presença ou liberar para outra pessoa."
+                    )}
+                    
                     {publicEvent?.prazo_rsvp && (
-                      <span className="block mt-2 font-bold text-white">
-                        Prazo limite: {new Date(publicEvent.prazo_rsvp).toLocaleString('pt-BR')}
+                      <span className="block mt-2 font-bold text-white/80 text-xs">
+                        Prazo limite para alterações: {new Date(publicEvent.prazo_rsvp).toLocaleString('pt-BR')}
                       </span>
                     )}
                   </p>
                   
                   {rsvpDeadlinePassed ? (
                     <div className="bg-white/10 border border-white/20 p-4 rounded-2xl backdrop-blur-md flex items-center gap-3">
-                      <XCircle className="size-6 text-white" />
+                      <Lock className="size-6 text-white" />
                       <p className="font-black uppercase tracking-widest text-sm">O prazo para confirmação expirou</p>
                     </div>
                   ) : (
                     <div className="flex flex-col md:flex-row gap-4">
-                      <button 
-                        onClick={() => handleRSVP('confirm')}
-                        disabled={loading}
-                        className="flex-1 bg-white text-blue-600 hover:bg-blue-50 font-black py-4 rounded-2xl transition-all shadow-lg shadow-black/10 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
-                      >
-                        {loading ? 'Processando...' : (isSoldOut ? 'Entrar na Lista de Espera' : 'Confirmar Presença')}
-                        <Check className="size-5" />
-                      </button>
-                      <button 
-                        onClick={() => handleRSVP('decline')}
-                        disabled={loading}
-                        className="flex-1 bg-blue-700/50 hover:bg-blue-700 text-white font-black py-4 rounded-2xl transition-all border border-white/20 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
-                      >
-                        Desistir da Vaga
-                        <X className="size-5" />
-                      </button>
+                      {user.rsvp_status !== 'confirmado' && (
+                        <button 
+                          onClick={() => handleRSVP('confirm')}
+                          disabled={loading}
+                          className="flex-1 bg-white text-blue-600 hover:bg-blue-50 font-black py-4 rounded-2xl transition-all shadow-lg shadow-black/10 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
+                        >
+                          {loading ? 'Processando...' : (isSoldOut ? 'Entrar na Lista de Espera' : (user.rsvp_status === 'desistente' ? 'Mudei de ideia, vou sim!' : 'Confirmar Presença'))}
+                          <Check className="size-5" />
+                        </button>
+                      )}
+                      {user.rsvp_status !== 'desistente' && (
+                        <button 
+                          onClick={() => handleRSVP('decline')}
+                          disabled={loading}
+                          className="flex-1 bg-blue-700/50 hover:bg-blue-700 text-white font-black py-4 rounded-2xl transition-all border border-white/20 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
+                        >
+                          {user.rsvp_status === 'confirmado' ? 'Não poderei ir mais' : 'Desistir da Vaga'}
+                          <X className="size-5" />
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2568,7 +2588,8 @@ export default function App() {
                           instagram: '', 
                           password: '',
                           valor_total: config?.event.valor.toString() || '',
-                          acompanhantes_count: 0
+                          acompanhantes_count: 0,
+                          rsvp_status: ''
                         });
                         setShowGuestForm(true);
                       }}
@@ -2875,7 +2896,8 @@ export default function App() {
                                             instagram: g.instagram || '',
                                             password: '',
                                             valor_total: g.valor_total?.toString() || '',
-                                            acompanhantes_count: g.acompanhantes_count || 0
+                                            acompanhantes_count: g.acompanhantes_count || 0,
+                                            rsvp_status: g.rsvp_status || ''
                                           });
                                           setShowGuestForm(true);
                                         }}
@@ -3675,6 +3697,22 @@ export default function App() {
                       required
                     />
                   )}
+                  <div className="space-y-1">
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Status RSVP</label>
+                    <div className="relative">
+                      <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 size-5" />
+                      <select 
+                        className="w-full pl-12 pr-4 py-3.5 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none text-slate-900 font-medium appearance-none"
+                        value={guestFormData.rsvp_status}
+                        onChange={(e) => setGuestFormData({...guestFormData, rsvp_status: e.target.value})}
+                      >
+                        <option value="">Pendente</option>
+                        <option value="confirmado">Confirmado</option>
+                        <option value="desistente">Desistente</option>
+                        <option value="lista_espera">Lista de Espera</option>
+                      </select>
+                    </div>
+                  </div>
                   <div className="pt-4 flex gap-3">
                     <button 
                       type="button"
