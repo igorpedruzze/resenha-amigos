@@ -1374,7 +1374,7 @@ export default function App() {
                     label="E-mail" 
                     icon={Mail} 
                     type="email"
-                    autoComplete="email"
+                    autoComplete="username"
                     placeholder="seu@email.com"
                     value={signupData.email}
                     onChange={(e: any) => setSignupData({...signupData, email: e.target.value})}
@@ -1397,6 +1397,7 @@ export default function App() {
                       name="instagram"
                       label="Instagram" 
                       icon={Instagram} 
+                      autoComplete="off"
                       placeholder="@seu.perfil"
                       value={signupData.instagram}
                       onChange={(e: any) => setSignupData({...signupData, instagram: e.target.value})}
@@ -1499,7 +1500,7 @@ export default function App() {
                     label="E-mail" 
                     icon={Mail} 
                     type="email"
-                    autoComplete="username email"
+                    autoComplete="username"
                     placeholder="seu@email.com"
                     value={loginData.email}
                     onChange={(e: any) => setLoginData({...loginData, email: e.target.value})}
@@ -1602,7 +1603,9 @@ export default function App() {
         </header>
 
         <main className="max-w-4xl mx-auto px-4 md:px-6 py-6 md:py-10">
-
+          {/* Hidden input to help browser password manager identify the correct username */}
+          <input type="text" name="username" style={{ display: 'none' }} autoComplete="username" value={user.email} readOnly />
+          
           <div className="mb-8">
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -1990,6 +1993,8 @@ export default function App() {
   if (view === 'admin' && user && adminStats) {
     return (
       <div className="min-h-screen bg-slate-50 font-sans flex overflow-hidden">
+        {/* Hidden input to help browser password manager identify the correct username */}
+        <input type="text" name="username" style={{ display: 'none' }} autoComplete="username" value={user.email} readOnly />
         {/* Toast Notification */}
         <AnimatePresence>
           {toast && (
