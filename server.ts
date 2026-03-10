@@ -720,6 +720,9 @@ async function startServer() {
   app.get("/api/public/event", (req, res) => {
     const event = getActiveEvent();
     if (!event) return res.status(404).json({ error: "Evento não encontrado" });
+    
+    const admin = db.prepare("SELECT foto_perfil FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
+    
     res.json({
       nome: event.nome,
       local: event.local || "Local a definir",
@@ -728,7 +731,8 @@ async function startServer() {
       flyer_landing: event.flyer_landing,
       flyer_landing_mobile: event.flyer_landing_mobile,
       flyer_dashboard: event.flyer_dashboard,
-      limite_acompanhantes: event.limite_acompanhantes || 4
+      limite_acompanhantes: event.limite_acompanhantes || 4,
+      admin_foto: admin?.foto_perfil || null
     });
   });
 

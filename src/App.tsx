@@ -260,7 +260,17 @@ export default function App() {
   const [config, setConfig] = useState<ConfigData | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [logs, setLogs] = useState<ActivityLog[]>([]);
-  const [publicEvent, setPublicEvent] = useState<{nome: string, local: string, data: string, valor: number, flyer_landing?: string, flyer_landing_mobile?: string, flyer_dashboard?: string} | null>(null);
+  const [publicEvent, setPublicEvent] = useState<{
+    nome: string, 
+    local: string, 
+    data: string, 
+    valor: number, 
+    flyer_landing?: string, 
+    flyer_landing_mobile?: string, 
+    flyer_dashboard?: string,
+    limite_acompanhantes?: number,
+    admin_foto?: string
+  } | null>(null);
   const [pendingPayments, setPendingPayments] = useState<Payment[]>([]);
   const [guests, setGuests] = useState<UserData[]>([]);
   const [companions, setCompanions] = useState<Companion[]>([]);
@@ -381,6 +391,26 @@ export default function App() {
     setView('login');
     setIsSidebarOpen(false);
   };
+
+  useEffect(() => {
+    if (publicEvent) {
+      // Update Title
+      document.title = publicEvent.nome || 'Resenha';
+
+      // Update Favicon
+      if (publicEvent.admin_foto) {
+        let link: HTMLLinkElement | null = document.querySelector("link[rel~='icon']");
+        if (!link) {
+          link = document.createElement('link');
+          link.rel = 'icon';
+          document.getElementsByTagName('head')[0].appendChild(link);
+        }
+        link.href = publicEvent.admin_foto;
+      }
+    } else {
+      document.title = 'Resenha';
+    }
+  }, [publicEvent]);
 
   useEffect(() => {
     fetchPublicEvent();
@@ -1594,7 +1624,10 @@ export default function App() {
               user={user} 
               size="sm" 
               showToast={showToast} 
-              onUpdate={(newUrl) => setUser(prev => prev ? { ...prev, foto_perfil: newUrl } : null)} 
+              onUpdate={(newUrl) => {
+                setUser(prev => prev ? { ...prev, foto_perfil: newUrl } : null);
+                if (user.role === 'admin') fetchPublicEvent();
+              }} 
             />
             <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 transition-all">
               <LogOut className="size-4 md:size-5" />
@@ -2085,7 +2118,10 @@ export default function App() {
                   user={user} 
                   size="sm" 
                   showToast={showToast} 
-                  onUpdate={(newUrl) => setUser(prev => prev ? { ...prev, foto_perfil: newUrl } : null)} 
+                  onUpdate={(newUrl) => {
+                    setUser(prev => prev ? { ...prev, foto_perfil: newUrl } : null);
+                    if (user.role === 'admin') fetchPublicEvent();
+                  }} 
                 />
                 <div className="truncate">
                   <p className="text-white text-sm font-semibold truncate">{user.nome}</p>
