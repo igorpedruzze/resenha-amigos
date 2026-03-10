@@ -35,6 +35,7 @@ import {
   Eye,
   Trash2,
   Edit,
+  Search,
   Settings,
   Cog,
   MessageCircle,
@@ -242,6 +243,8 @@ export default function App() {
     type: 'manual' | 'approval';
   } | null>(null);
   const [guestFilter, setGuestFilter] = useState<'ativo' | 'pendente' | 'recusado'>('ativo');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchFilter, setSearchFilter] = useState<'nome' | 'id' | 'instagram' | 'whatsapp'>('nome');
   const [updateAllValue, setUpdateAllValue] = useState('');
   const [showUpdateAllConfirm, setShowUpdateAllConfirm] = useState(false);
 
@@ -2274,6 +2277,44 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Search and Filter System */}
+                <div className="bg-white p-4 md:p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+                  <div className="flex flex-col md:flex-row gap-4">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 size-5" />
+                      <input 
+                        type="text"
+                        placeholder="Buscar convidado..."
+                        className="w-full pl-12 pr-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none text-slate-900 font-medium"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <select 
+                        className="px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none text-slate-900 font-bold text-sm min-w-[140px]"
+                        value={searchFilter}
+                        onChange={(e) => setSearchFilter(e.target.value as any)}
+                      >
+                        <option value="nome">Nome</option>
+                        <option value="id">ID (Código)</option>
+                        <option value="instagram">Instagram</option>
+                        <option value="whatsapp">WhatsApp</option>
+                      </select>
+                      <button 
+                        onClick={() => {
+                          setSearchQuery('');
+                          setSearchFilter('nome');
+                        }}
+                        className="px-6 py-3 rounded-2xl border border-slate-200 text-slate-500 font-bold hover:bg-slate-50 transition-all flex items-center gap-2 whitespace-nowrap"
+                      >
+                        <X className="size-4" />
+                        Limpar Filtros
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Update All Values Section */}
                 <div className="bg-amber-50 border border-amber-200 p-4 md:p-6 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-4">
                   <div className="flex items-start gap-4">
@@ -2320,7 +2361,26 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {guests.filter(g => (g.status || 'ativo') === guestFilter).map((g) => {
+                        {guests.filter(g => {
+                          const matchesStatus = (g.status || 'ativo') === guestFilter;
+                          if (!matchesStatus) return false;
+                          
+                          if (!searchQuery) return true;
+                          
+                          const query = searchQuery.toLowerCase();
+                          switch (searchFilter) {
+                            case 'nome':
+                              return g.nome.toLowerCase().includes(query);
+                            case 'id':
+                              return (g.codigo_convidado || '').toLowerCase().includes(query);
+                            case 'instagram':
+                              return (g.instagram || '').toLowerCase().includes(query);
+                            case 'whatsapp':
+                              return (g.whatsapp || '').toLowerCase().includes(query);
+                            default:
+                              return true;
+                          }
+                        }).map((g) => {
                           const guestStats = adminStats?.guests.find(as => as.id === g.id);
                           const paid = guestStats?.paid || 0;
                           const totalDue = g.valor_total !== undefined && g.valor_total !== null ? g.valor_total : (adminStats?.eventValue || 500);

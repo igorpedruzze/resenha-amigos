@@ -10,10 +10,15 @@ import { Resend } from "resend";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Ensure database directory exists
+// Ensure database and upload directories exist
 const dbDir = process.env.DB_PATH || path.join(__dirname, "data");
+const uploadDir = path.join(dbDir, "uploads");
+
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
+}
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
 }
 
 // Migration: Move files from old 'database' folder to new 'data' folder if 'database' exists
@@ -579,10 +584,37 @@ async function startServer() {
   }
 
   const app = express();
-  app.use(express.json({ limit: '10mb' }));
+  app.use(express.json({ limit: '15mb' }));
+  app.use(express.urlencoded({ limit: '15mb', extended: true }));
+  
+  // Serve uploaded files
+  app.use('/uploads', express.static(uploadDir));
 
   // Helper to get current active event
   const getActiveEvent = () => db.prepare("SELECT * FROM eventos LIMIT 1").get() as any;
+
+  // Helper to save base64 image to disk
+  const saveBase64Image = (base64Str: string, prefix: string, customName?: string) => {
+    if (!base64Str || !base64Str.startsWith('data:image/')) return base64Str;
+    
+    try {
+      const matches = base64Str.match(/^data:image\/([A-Za-z-+/]+);base64,(.+)$/);
+      if (!matches || matches.length !== 3) return base64Str;
+      
+      const extension = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+      const buffer = Buffer.from(matches[2], 'base64');
+      const fileName = customName 
+        ? `${customName}.${extension}`
+        : `${prefix}_${Date.now()}.${extension}`;
+      const filePath = path.join(uploadDir, fileName);
+      
+      fs.writeFileSync(filePath, buffer);
+      return `/uploads/${fileName}`;
+    } catch (err) {
+      console.error(`Error saving ${prefix} image:`, err);
+      return base64Str;
+    }
+  };
 
   function generateGuestCode(): string {
     let code = '';
@@ -853,15 +885,25 @@ async function startServer() {
       return res.status(404).json({ error: "Nenhum evento ativo encontrado" });
     }
     
+    const user = db.prepare("SELECT nome FROM usuarios WHERE id = ?").get(userId) as any;
+    const sanitizedName = (user?.nome || 'usuario')
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]/g, '_')
+      .replace(/_+/g, '_');
+    
+    const customFileName = `pagamento_${userId}_${sanitizedName}`;
+    const comprovanteUrl = saveBase64Image(comprovanteBase64, 'comprovante', customFileName);
+
     try {
       db.prepare("INSERT INTO pagamentos (usuario_id, evento_id, valor, status, comprovante_url) VALUES (?, ?, ?, ?, ?)").run(
         userId, 
         event.id, 
         amount, 
         'pendente',
-        comprovanteBase64
+        comprovanteUrl
       );
-      const user = db.prepare("SELECT nome FROM usuarios WHERE id = ?").get(userId) as any;
       addLog(userId, user?.nome || 'Usuário', 'Envio de Comprovante', `Convidado ${user?.nome} enviou um comprovante de R$ ${amount} para análise.`);
       res.json({ success: true });
     } catch (error: any) {
@@ -1199,9 +1241,31 @@ async function startServer() {
     const status = action === 'approve' ? 'concluido' : 'rejeitado';
     
     try {
-      db.prepare("UPDATE pagamentos SET status = ? WHERE id = ?").run(status, id);
-      
       const payment = db.prepare("SELECT p.*, u.nome as user_name, u.email as user_email, u.valor_total FROM pagamentos p JOIN usuarios u ON p.usuario_id = u.id WHERE p.id = ?").get(id) as any;
+      
+      if (!payment) {
+        return res.status(404).json({ error: "Pagamento não encontrado" });
+      }
+
+      // Physical deletion of the receipt file
+      if (payment.comprovante_url && payment.comprovante_url.startsWith('/uploads/')) {
+        try {
+          const fileName = payment.comprovante_url.replace('/uploads/', '');
+          const filePath = path.join(uploadDir, fileName);
+          
+          // Security check: ensure the path is still inside uploadDir
+          if (filePath.startsWith(uploadDir) && fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            console.log(`Physical file deleted: ${filePath}`);
+          }
+        } catch (err) {
+          console.error("Error deleting physical file:", err);
+          // We continue anyway to update the database
+        }
+      }
+
+      db.prepare("UPDATE pagamentos SET status = ?, comprovante_url = NULL WHERE id = ?").run(status, id);
+      
       const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
       const acao = action === 'approve' ? 'Aprovação de Pix' : 'Rejeição de Pix';
       const msg = action === 'approve' 
@@ -1417,6 +1481,10 @@ async function startServer() {
     const activeEvent = getActiveEvent();
     const admin = db.prepare("SELECT id FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
 
+    const flyerLanding = saveBase64Image(event.flyer_landing, 'flyer_landing');
+    const flyerLandingMobile = saveBase64Image(event.flyer_landing_mobile, 'flyer_landing_mobile');
+    const flyerDashboard = saveBase64Image(event.flyer_dashboard, 'flyer_dashboard');
+
     try {
       db.transaction(() => {
         db.prepare(`
@@ -1445,9 +1513,9 @@ async function startServer() {
           event.data, 
           event.valor, 
           event.pixKey, 
-          event.flyer_landing, 
-          event.flyer_landing_mobile,
-          event.flyer_dashboard, 
+          flyerLanding, 
+          flyerLandingMobile,
+          flyerDashboard, 
           event.capacidade_maxima,
           event.smtp_host,
           event.smtp_port,
