@@ -1070,9 +1070,21 @@ async function startServer() {
         return res.status(400).json({ error: "Ainda não há vagas disponíveis." });
       }
     } else if (action === 'decline') {
+      // Auto-remove companions to free up space
+      const companionsCount = db.prepare("SELECT COUNT(*) as count FROM acompanhantes WHERE usuario_id = ?").get(userId) as any;
+      if (companionsCount.count > 0) {
+        db.prepare("DELETE FROM acompanhantes WHERE usuario_id = ?").run(userId);
+        addLog(userId, user.nome, 'RSVP - Desistente (Limpou Acompanhantes)', `Informou que não poderá comparecer e removeu automaticamente ${companionsCount.count} acompanhante(s).`);
+      } else {
+        addLog(userId, user.nome, 'RSVP - Desistente', "Informou que não poderá comparecer");
+      }
+      
       db.prepare("UPDATE usuarios SET rsvp_status = 'desistente' WHERE id = ?").run(userId);
-      addLog(userId, user.nome, 'RSVP - Desistente', "Informou que não poderá comparecer");
-      return res.json({ success: true, status: 'desistente' });
+      return res.json({ 
+        success: true, 
+        status: 'desistente',
+        message: companionsCount.count > 0 ? "Desistência registrada. Seus acompanhantes foram removidos para liberar as vagas." : "Desistência registrada."
+      });
     }
 
     res.status(400).json({ error: "Ação inválida" });
@@ -1210,6 +1222,12 @@ async function startServer() {
     }
 
     try {
+      // Security Check: Must be confirmed to add companions
+      const user = db.prepare("SELECT nome, rsvp_status FROM usuarios WHERE id = ?").get(userId) as any;
+      if (!user || user.rsvp_status !== 'confirmado') {
+        return res.status(403).json({ error: "Você precisa confirmar sua presença antes de adicionar acompanhantes." });
+      }
+
       // Get limit from config
       const limit = event?.limite_acompanhantes || 4;
 
@@ -1232,7 +1250,6 @@ async function startServer() {
 
       db.prepare("INSERT INTO acompanhantes (usuario_id, nome, instagram, status) VALUES (?, ?, ?, 'pendente_aprovacao')").run(userId, nome, instagram);
       
-      const user = db.prepare("SELECT nome FROM usuarios WHERE id = ?").get(userId) as any;
       addLog(userId, user?.nome || 'Usuário', 'Solicitação de Acompanhante', `Convidado ${user?.nome} solicitou a adição do acompanhante ${nome}. Aguardando aprovação.`);
       
       res.json({ success: true });

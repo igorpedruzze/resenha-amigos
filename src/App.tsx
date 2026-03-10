@@ -46,7 +46,8 @@ import {
   Key,
   Info,
   Send,
-  Camera
+  Camera,
+  AlertCircle
 } from 'lucide-react';
 
 // Types
@@ -404,6 +405,14 @@ export default function App() {
 
   const handleRSVP = async (action: 'confirm' | 'decline') => {
     if (!user) return;
+
+    if (action === 'decline' && companions.length > 0) {
+      const confirmDecline = window.confirm(
+        `Atenção: Você possui ${companions.length} acompanhante(s) cadastrado(s). \n\nAo confirmar sua desistência, TODOS os seus acompanhantes serão removidos automaticamente para liberar as vagas no evento. \n\nDeseja continuar?`
+      );
+      if (!confirmDecline) return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch('/api/user/rsvp', {
@@ -416,6 +425,7 @@ export default function App() {
         showToast(data.message || (action === 'confirm' ? 'Presença confirmada!' : 'Desistência registrada.'), 'success');
         fetchMe();
         fetchPublicEvent();
+        if (action === 'decline') fetchCompanions(); // Refresh companions list after auto-removal
       } else {
         showToast(data.error, 'error');
       }
@@ -1957,64 +1967,78 @@ export default function App() {
                 </div>
                 <button 
                   onClick={() => setShowCompanionForm(true)}
-                  disabled={companions.length >= (publicEvent?.limite_acompanhantes || 4)}
+                  disabled={user.rsvp_status !== 'confirmado' || companions.length >= (publicEvent?.limite_acompanhantes || 4)}
                   className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-3 md:px-4 md:py-2 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-600/20 disabled:opacity-50 w-full md:w-auto"
                 >
                   <Plus className="size-4" />
-                  {companions.length >= (publicEvent?.limite_acompanhantes || 4) ? 'Limite Atingido' : 'Adicionar'}
+                  {user.rsvp_status !== 'confirmado' ? 'Confirme Presença Primeiro' : (companions.length >= (publicEvent?.limite_acompanhantes || 4) ? 'Limite Atingido' : 'Adicionar')}
                 </button>
               </div>
 
-              {companions.some(c => c.status === 'pendente_aprovacao') && (
-                <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl flex items-start gap-3 animate-pulse">
-                  <Clock className="size-5 text-amber-600 mt-0.5" />
-                  <p className="text-xs text-amber-800 font-medium leading-relaxed">
-                    Acompanhante aguardando aprovação do organizador. O valor será atualizado após a confirmação.
+              {user.rsvp_status !== 'confirmado' ? (
+                <div className="bg-amber-50 border border-amber-200 p-6 rounded-2xl flex flex-col items-center text-center gap-3">
+                  <AlertCircle className="size-10 text-amber-600 mb-2" />
+                  <p className="text-sm text-amber-800 font-black leading-relaxed max-w-xs">
+                    ⚠️ Você precisa confirmar sua presença no botão acima antes de poder gerenciar seus acompanhantes.
+                  </p>
+                  <p className="text-xs text-amber-700 font-medium">
+                    A liberação para adicionar acompanhantes é automática após a confirmação.
                   </p>
                 </div>
-              )}
-
-              <div className="space-y-3">
-                {companions.map((c) => (
-                  <div key={c.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                    <div className="flex items-center gap-3">
-                      <div className={`size-10 rounded-full flex items-center justify-center font-bold ${c.status === 'aprovado' ? 'bg-blue-100 text-blue-600' : 'bg-slate-200 text-slate-500'}`}>
-                        {c.nome.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-bold text-slate-900">{c.nome}</p>
-                          <span className={`text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-widest ${c.status === 'aprovado' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                            {c.status === 'aprovado' ? 'Aprovado' : 'Pendente'}
-                          </span>
-                        </div>
-                        {c.instagram && <p className="text-xs text-slate-500">{c.instagram}</p>}
-                      </div>
+              ) : (
+                <>
+                  {companions.some(c => c.status === 'pendente_aprovacao') && (
+                    <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl flex items-start gap-3 animate-pulse">
+                      <Clock className="size-5 text-amber-600 mt-0.5" />
+                      <p className="text-xs text-amber-800 font-medium leading-relaxed">
+                        Acompanhante aguardando aprovação do organizador. O valor será atualizado após a confirmação.
+                      </p>
                     </div>
-                    <button 
-                      onClick={() => {
-                        if (companionDeleteConfirmId === c.id) {
-                          handleRemoveCompanion(c.id);
-                        } else {
-                          setCompanionDeleteConfirmId(c.id);
-                          setTimeout(() => setCompanionDeleteConfirmId(null), 3000);
-                        }
-                      }}
-                      disabled={balance ? (balance.totalPaid >= balance.totalDue && balance.totalDue > 0) : false}
-                      className={`p-2 rounded-lg transition-all disabled:opacity-30 disabled:hover:bg-transparent ${companionDeleteConfirmId === c.id ? 'bg-red-600 text-white' : 'text-slate-400 hover:text-red-600 hover:bg-red-50'}`}
-                      title={companionDeleteConfirmId === c.id ? "Clique novamente para confirmar" : (balance && balance.totalPaid >= balance.totalDue && balance.totalDue > 0 ? "Não é possível remover após o pagamento" : "Remover Acompanhante")}
-                    >
-                      {companionDeleteConfirmId === c.id ? <Check className="size-4" /> : <Trash2 className="size-4" />}
-                    </button>
+                  )}
+
+                  <div className="space-y-3">
+                    {companions.map((c) => (
+                      <div key={c.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                        <div className="flex items-center gap-3">
+                          <div className={`size-10 rounded-full flex items-center justify-center font-bold ${c.status === 'aprovado' ? 'bg-blue-100 text-blue-600' : 'bg-slate-200 text-slate-500'}`}>
+                            {c.nome.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="font-bold text-slate-900">{c.nome}</p>
+                              <span className={`text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-widest ${c.status === 'aprovado' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                {c.status === 'aprovado' ? 'Aprovado' : 'Pendente'}
+                              </span>
+                            </div>
+                            {c.instagram && <p className="text-xs text-slate-500">{c.instagram}</p>}
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => {
+                            if (companionDeleteConfirmId === c.id) {
+                              handleRemoveCompanion(c.id);
+                            } else {
+                              setCompanionDeleteConfirmId(c.id);
+                              setTimeout(() => setCompanionDeleteConfirmId(null), 3000);
+                            }
+                          }}
+                          disabled={balance ? (balance.totalPaid >= balance.totalDue && balance.totalDue > 0) : false}
+                          className={`p-2 rounded-lg transition-all disabled:opacity-30 disabled:hover:bg-transparent ${companionDeleteConfirmId === c.id ? 'bg-red-600 text-white' : 'text-slate-400 hover:text-red-600 hover:bg-red-50'}`}
+                          title={companionDeleteConfirmId === c.id ? "Clique novamente para confirmar" : (balance && balance.totalPaid >= balance.totalDue && balance.totalDue > 0 ? "Não é possível remover após o pagamento" : "Remover Acompanhante")}
+                        >
+                          {companionDeleteConfirmId === c.id ? <Check className="size-4" /> : <Trash2 className="size-4" />}
+                        </button>
+                      </div>
+                    ))}
+                    {companions.length === 0 && (
+                      <div className="py-8 text-center border-2 border-dashed border-slate-100 rounded-2xl">
+                        <Users className="size-8 text-slate-200 mx-auto mb-2" />
+                        <p className="text-slate-400 text-sm">Nenhum acompanhante adicionado.</p>
+                      </div>
+                    )}
                   </div>
-                ))}
-                {companions.length === 0 && (
-                  <div className="py-8 text-center border-2 border-dashed border-slate-100 rounded-2xl">
-                    <Users className="size-8 text-slate-200 mx-auto mb-2" />
-                    <p className="text-slate-400 text-sm">Nenhum acompanhante adicionado.</p>
-                  </div>
-                )}
-              </div>
+                </>
+              )}
             </div>
 
             {/* Histórico de Pagamentos */}
