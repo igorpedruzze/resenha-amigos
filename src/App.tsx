@@ -147,12 +147,13 @@ interface Template {
 }
 
 // Components
-const Input = ({ label, icon: Icon, ...props }: any) => (
+const Input = ({ label, icon: Icon, id, ...props }: any) => (
   <div className="flex flex-col gap-1.5">
-    <label className="text-sm font-bold text-slate-700 ml-1">{label}</label>
+    <label htmlFor={id} className="text-sm font-bold text-slate-700 ml-1">{label}</label>
     <div className="relative">
       <Icon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 size-5" />
       <input 
+        id={id}
         className="w-full pl-12 pr-4 py-3.5 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none text-slate-900 text-base"
         {...props}
       />
@@ -1159,9 +1160,12 @@ export default function App() {
               {view === 'forgot-password' ? (
                 <form onSubmit={handleForgotPassword} className="space-y-5">
                   <Input 
+                    id="forgot_email"
+                    name="email"
                     label="E-mail Cadastrado" 
                     icon={Mail} 
                     type="email"
+                    autoComplete="email"
                     placeholder="seu@email.com"
                     value={forgotPasswordEmail}
                     onChange={(e: any) => setForgotPasswordEmail(e.target.value)}
@@ -1191,18 +1195,24 @@ export default function App() {
               ) : view === 'reset-password' ? (
                 <form onSubmit={handleResetPassword} className="space-y-5">
                   <Input 
+                    id="reset_password"
+                    name="new-password"
                     label="Nova Senha" 
                     icon={Lock} 
                     type="password" 
+                    autoComplete="new-password"
                     placeholder="••••••••"
                     value={resetPasswordForm.password}
                     onChange={(e: any) => setResetPasswordForm({...resetPasswordForm, password: e.target.value})}
                     required
                   />
                   <Input 
+                    id="confirm_reset_password"
+                    name="confirm-password"
                     label="Confirmar Nova Senha" 
                     icon={Lock} 
                     type="password" 
+                    autoComplete="new-password"
                     placeholder="••••••••"
                     value={resetPasswordForm.confirm}
                     onChange={(e: any) => setResetPasswordForm({...resetPasswordForm, confirm: e.target.value})}
@@ -1225,17 +1235,23 @@ export default function App() {
               ) : view === 'signup' ? (
                 <form onSubmit={handleSignup} className="space-y-5">
                   <Input 
+                    id="signup_name"
+                    name="name"
                     label="Nome Completo" 
                     icon={User} 
+                    autoComplete="name"
                     placeholder="Como quer ser chamado?"
                     value={signupData.name}
                     onChange={(e: any) => setSignupData({...signupData, name: e.target.value})}
                     required
                   />
                   <Input 
+                    id="signup_email"
+                    name="email"
                     label="E-mail" 
                     icon={Mail} 
                     type="email"
+                    autoComplete="username"
                     placeholder="seu@email.com"
                     value={signupData.email}
                     onChange={(e: any) => setSignupData({...signupData, email: e.target.value})}
@@ -1243,14 +1259,19 @@ export default function App() {
                   />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Input 
+                      id="signup_whatsapp"
+                      name="whatsapp"
                       label="WhatsApp" 
                       icon={Phone} 
+                      autoComplete="tel"
                       placeholder="(00) 00000-0000"
                       value={signupData.whatsapp}
                       onChange={(e: any) => setSignupData({...signupData, whatsapp: e.target.value})}
                       required
                     />
                     <Input 
+                      id="signup_instagram"
+                      name="instagram"
                       label="Instagram" 
                       icon={Instagram} 
                       placeholder="@seu.perfil"
@@ -1268,9 +1289,12 @@ export default function App() {
                   </div>
 
                   <Input 
+                    id="signup_password"
+                    name="password"
                     label="Crie uma Senha" 
                     icon={Lock} 
                     type="password"
+                    autoComplete="new-password"
                     placeholder="Mínimo 6 caracteres (1 letra, 5 números)"
                     value={signupData.password}
                     onChange={(e: any) => setSignupData({...signupData, password: e.target.value})}
@@ -1278,9 +1302,12 @@ export default function App() {
                   />
 
                   <Input 
+                    id="signup_confirm_password"
+                    name="confirm_password"
                     label="Confirme sua Senha" 
                     icon={Lock} 
                     type="password"
+                    autoComplete="new-password"
                     placeholder="Repita a senha criada"
                     value={signupData.confirmPassword}
                     onChange={(e: any) => setSignupData({...signupData, confirmPassword: e.target.value})}
@@ -1305,18 +1332,24 @@ export default function App() {
               ) : (
                 <form onSubmit={handleLogin} className="space-y-5">
                   <Input 
+                    id="login_email"
+                    name="email"
                     label="E-mail" 
                     icon={Mail} 
                     type="email"
+                    autoComplete="username"
                     placeholder="seu@email.com"
                     value={loginData.email}
                     onChange={(e: any) => setLoginData({...loginData, email: e.target.value})}
                     required
                   />
                   <Input 
+                    id="login_password"
+                    name="password"
                     label="Senha" 
                     icon={Lock} 
                     type="password"
+                    autoComplete="current-password"
                     placeholder="Sua senha de acesso"
                     value={loginData.password}
                     onChange={(e: any) => setLoginData({...loginData, password: e.target.value})}
