@@ -271,7 +271,10 @@ export default function App() {
     flyer_landing_mobile?: string, 
     flyer_dashboard?: string,
     limite_acompanhantes?: number,
-    admin_foto?: string
+    admin_foto?: string,
+    prazo_rsvp?: string,
+    capacidade_maxima?: number,
+    ocupacao_atual?: number
   } | null>(null);
   const [pendingPayments, setPendingPayments] = useState<Payment[]>([]);
   const [guests, setGuests] = useState<UserData[]>([]);
@@ -411,6 +414,7 @@ export default function App() {
       if (res.ok) {
         showToast(data.message || (action === 'confirm' ? 'Presença confirmada!' : 'Desistência registrada.'), 'success');
         fetchMe();
+        fetchPublicEvent();
       } else {
         showToast(data.error, 'error');
       }
@@ -759,6 +763,7 @@ export default function App() {
       } else {
         setAuthError(data.error || 'Erro ao realizar cadastro');
         showToast(data.error || 'Erro ao realizar cadastro', 'error');
+        fetchPublicEvent();
       }
     } catch (error) {
       setAuthError('Erro de conexão com o servidor');
@@ -1422,6 +1427,22 @@ export default function App() {
                     {loading ? <div className="size-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Alterar Senha'}
                   </button>
                 </form>
+              ) : view === 'signup' && publicEvent && publicEvent.ocupacao_atual !== undefined && publicEvent.capacidade_maxima !== undefined && publicEvent.ocupacao_atual >= publicEvent.capacidade_maxima ? (
+                <div className="flex flex-col items-center justify-center py-10 text-center">
+                  <div className="size-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-6 shadow-lg shadow-red-200">
+                    <XCircle className="size-12" />
+                  </div>
+                  <h2 className="text-2xl md:text-3xl font-black text-slate-900 mb-4 uppercase tracking-tight">Vagas Esgotadas! 🚀</h2>
+                  <p className="text-slate-500 font-medium mb-8 max-w-xs mx-auto">
+                    Infelizmente atingimos o limite máximo de convidados para este evento.
+                  </p>
+                  <button 
+                    onClick={() => setView('login')}
+                    className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-4 rounded-xl shadow-xl transition-all flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
+                  >
+                    Já sou cadastrado? Faça login
+                  </button>
+                </div>
               ) : view === 'signup' ? (
                 <form onSubmit={handleSignup} method="POST" className="space-y-5">
                   <Input 
@@ -1589,6 +1610,7 @@ export default function App() {
     
     const rsvpDeadlinePassed = publicEvent?.prazo_rsvp ? new Date() > new Date(publicEvent.prazo_rsvp) : false;
     const showRSVP = user.status === 'ativo' && !user.rsvp_status;
+    const isSoldOut = publicEvent && publicEvent.ocupacao_atual !== undefined && publicEvent.capacidade_maxima !== undefined && publicEvent.ocupacao_atual >= publicEvent.capacidade_maxima;
     
     const PENDING_IMAGE = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?q=80&w=1000&auto=format&fit=crop";
     const PAID_IMAGE = "https://images.unsplash.com/photo-1513151233558-d860c5398176?q=80&w=1000&auto=format&fit=crop";
@@ -1672,7 +1694,7 @@ export default function App() {
                     <h3 className="text-xl md:text-2xl font-black uppercase tracking-tight">Confirmação de Presença</h3>
                   </div>
                   <p className="text-blue-100 text-sm md:text-base mb-6 max-w-xl">
-                    Sua solicitação foi aprovada! Agora, para garantir sua vaga na Resenha, você precisa confirmar sua presença.
+                    Sua vaga está reservada! Clique abaixo para confirmar sua presença ou liberar para outra pessoa.
                     {publicEvent?.prazo_rsvp && (
                       <span className="block mt-2 font-bold text-white">
                         Prazo limite: {new Date(publicEvent.prazo_rsvp).toLocaleString('pt-BR')}
@@ -1692,7 +1714,7 @@ export default function App() {
                         disabled={loading}
                         className="flex-1 bg-white text-blue-600 hover:bg-blue-50 font-black py-4 rounded-2xl transition-all shadow-lg shadow-black/10 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
                       >
-                        {loading ? 'Processando...' : 'Confirmar Presença'}
+                        {loading ? 'Processando...' : (isSoldOut ? 'Entrar na Lista de Espera' : 'Confirmar Presença')}
                         <Check className="size-5" />
                       </button>
                       <button 
@@ -1700,7 +1722,7 @@ export default function App() {
                         disabled={loading}
                         className="flex-1 bg-blue-700/50 hover:bg-blue-700 text-white font-black py-4 rounded-2xl transition-all border border-white/20 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
                       >
-                        Não poderei ir
+                        Desistir da Vaga
                         <X className="size-5" />
                       </button>
                     </div>
