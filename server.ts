@@ -200,6 +200,7 @@ async function startServer() {
       info_texto TEXT,
       flyer_info TEXT,
       limite_acompanhantes INTEGER DEFAULT 4,
+      prazo_rsvp TEXT,
       tpl_welcome TEXT,
       tpl_approval_guest TEXT,
       tpl_approval_companion TEXT,
@@ -219,7 +220,8 @@ async function startServer() {
       valor_total REAL,
       codigo_convidado TEXT UNIQUE,
       acompanhantes_count INTEGER DEFAULT 0,
-      status TEXT DEFAULT 'ativo' -- 'ativo', 'pendente', 'recusado'
+      status TEXT DEFAULT 'ativo', -- 'ativo', 'pendente', 'recusado'
+      rsvp_status TEXT -- 'confirmado', 'desistente', 'lista_espera'
     );
 
     -- Migration: Ensure role column exists if table was created without it
@@ -248,6 +250,12 @@ async function startServer() {
     db.exec("ALTER TABLE eventos ADD COLUMN tpl_password_recovery TEXT");
   } catch (e) {}
 
+  try {
+    db.exec("ALTER TABLE eventos ADD COLUMN prazo_rsvp TEXT");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE usuarios ADD COLUMN rsvp_status TEXT");
+  } catch (e) {}
   try {
     db.exec("ALTER TABLE usuarios ADD COLUMN role TEXT DEFAULT 'guest'");
   } catch (e) {}
@@ -732,6 +740,7 @@ async function startServer() {
       flyer_landing_mobile: event.flyer_landing_mobile,
       flyer_dashboard: event.flyer_dashboard,
       limite_acompanhantes: event.limite_acompanhantes || 4,
+      prazo_rsvp: event.prazo_rsvp,
       admin_foto: admin?.foto_perfil || null
     });
   });
@@ -912,6 +921,16 @@ async function startServer() {
     }
   });
 
+  app.get("/api/auth/me", (req, res) => {
+    const userId = (req.session as any).userId;
+    if (!userId) return res.status(401).json({ error: "Não autenticado" });
+
+    const user = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(userId) as any;
+    if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
+
+    res.json(user);
+  });
+
   app.post("/api/auth/login", (req, res) => {
     const { email, password } = req.body;
     try {
@@ -974,6 +993,65 @@ async function startServer() {
       info_texto: event.info_texto || "",
       flyer_info: event.flyer_info || ""
     });
+  });
+
+  app.post("/api/user/rsvp", (req, res) => {
+    const { userId, action } = req.body;
+    if (!userId || !action) return res.status(400).json({ error: "Dados incompletos" });
+
+    const user = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(userId) as any;
+    if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
+
+    const event = getActiveEvent();
+    if (!event) return res.status(404).json({ error: "Evento não encontrado" });
+
+    // Check deadline
+    if (event.prazo_rsvp) {
+      const deadline = new Date(event.prazo_rsvp);
+      if (new Date() > deadline) {
+        return res.status(400).json({ error: "O prazo para confirmação expirou" });
+      }
+    }
+
+    if (action === 'confirm') {
+      // Check capacity
+      const confirmedGuests = db.prepare("SELECT COUNT(*) as count FROM usuarios WHERE role = 'guest' AND status = 'ativo' AND rsvp_status = 'confirmado'").get() as any;
+      const confirmedCompanions = db.prepare(`
+        SELECT COUNT(*) as count 
+        FROM acompanhantes a
+        JOIN usuarios u ON a.usuario_id = u.id
+        WHERE a.status = 'aprovado' AND u.rsvp_status = 'confirmado'
+      `).get() as any;
+      
+      const currentConfirmed = (confirmedGuests.count || 0) + (confirmedCompanions.count || 0);
+      
+      // Count this user + their approved companions
+      const userCompanions = db.prepare("SELECT COUNT(*) as count FROM acompanhantes WHERE usuario_id = ? AND status = 'aprovado'").get(userId) as any;
+      const userTotal = 1 + (userCompanions.count || 0);
+
+      if (currentConfirmed + userTotal > (event.capacidade_maxima || 50)) {
+        db.prepare("UPDATE usuarios SET rsvp_status = 'lista_espera' WHERE id = ?").run(userId);
+        addLog(userId, user.nome, 'RSVP - Lista de Espera', `Entrou na lista de espera (Lotação atingida: ${currentConfirmed}/${event.capacidade_maxima})`);
+        return res.json({ 
+          success: true, 
+          status: 'lista_espera',
+          message: "Desculpe, a lotação máxima já foi atingida. Sua vaga foi para a lista de espera." 
+        });
+      }
+
+      db.prepare("UPDATE usuarios SET rsvp_status = 'confirmado' WHERE id = ?").run(userId);
+      addLog(userId, user.nome, 'RSVP - Confirmado', "Confirmou presença via RSVP");
+      return res.json({ success: true, status: 'confirmado' });
+    } else if (action === 'confirm_waitlist') {
+      // If user was in waitlist and capacity opened up? 
+      // Actually the user request doesn't specify this, but let's stick to the basic rules.
+    } else if (action === 'decline') {
+      db.prepare("UPDATE usuarios SET rsvp_status = 'desistente' WHERE id = ?").run(userId);
+      addLog(userId, user.nome, 'RSVP - Desistente', "Informou que não poderá comparecer");
+      return res.json({ success: true, status: 'desistente' });
+    }
+
+    res.status(400).json({ error: "Ação inválida" });
   });
 
   app.post("/api/user/profile-picture", async (req, res) => {
@@ -1464,9 +1542,14 @@ async function startServer() {
     const totalEsperadoResult = db.prepare("SELECT SUM(COALESCE(valor_total, ?)) as total FROM usuarios WHERE role = 'guest' AND status = 'ativo'").get(event.valor_por_pessoa);
     const totalEsperado = (totalEsperadoResult as any).total || 0;
 
-    // New logic for confirmed and total requests
-    const confirmedGuests = db.prepare("SELECT COUNT(*) as count FROM usuarios WHERE role = 'guest' AND status = 'ativo'").get() as any;
-    const confirmedCompanions = db.prepare("SELECT COUNT(*) as count FROM acompanhantes WHERE status = 'aprovado'").get() as any;
+    // RSVP Confirmed Stats
+    const confirmedGuests = db.prepare("SELECT COUNT(*) as count FROM usuarios WHERE role = 'guest' AND status = 'ativo' AND rsvp_status = 'confirmado'").get() as any;
+    const confirmedCompanions = db.prepare(`
+      SELECT COUNT(*) as count 
+      FROM acompanhantes a
+      JOIN usuarios u ON a.usuario_id = u.id
+      WHERE a.status = 'aprovado' AND u.rsvp_status = 'confirmado'
+    `).get() as any;
     const confirmedCount = (confirmedGuests.count || 0) + (confirmedCompanions.count || 0);
 
     const totalGuests = db.prepare("SELECT COUNT(*) as count FROM usuarios WHERE role = 'guest'").get() as any;
@@ -1667,7 +1750,8 @@ async function startServer() {
             resend_api_key = ?,
             from_email = ?,
             system_url = ?,
-            limite_acompanhantes = ?
+            limite_acompanhantes = ?,
+            prazo_rsvp = ?
           WHERE id = ?
         `).run(
           event.nome, 
@@ -1690,6 +1774,7 @@ async function startServer() {
           event.from_email,
           event.system_url,
           event.limite_acompanhantes || 4,
+          event.prazo_rsvp,
           activeEvent.id
         );
 

@@ -60,6 +60,7 @@ interface UserData {
   valor_total?: number;
   codigo_convidado?: string;
   status?: 'ativo' | 'pendente' | 'recusado';
+  rsvp_status?: 'confirmado' | 'desistente' | 'lista_espera' | null;
   companion_count?: number;
   acompanhantes_count?: number;
   companions?: { nome: string; instagram?: string }[];
@@ -95,6 +96,7 @@ interface EventConfig {
   info_texto?: string;
   flyer_info?: string;
   limite_acompanhantes?: number;
+  prazo_rsvp?: string;
 }
 
 interface OrganizerConfig {
@@ -382,6 +384,41 @@ export default function App() {
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
+  };
+
+  const fetchMe = async () => {
+    try {
+      const res = await fetch('/api/auth/me');
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data);
+      }
+    } catch (error) {
+      console.error('Error fetching me:', error);
+    }
+  };
+
+  const handleRSVP = async (action: 'confirm' | 'decline') => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/user/rsvp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, action })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || (action === 'confirm' ? 'Presença confirmada!' : 'Desistência registrada.'), 'success');
+        fetchMe();
+      } else {
+        showToast(data.error, 'error');
+      }
+    } catch (error) {
+      showToast('Erro ao processar RSVP', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleLogout = () => {
@@ -1550,6 +1587,9 @@ export default function App() {
     const progress = (balance.totalPaid / balance.totalDue) * 100;
     const isPaid = balance.balance <= 0;
     
+    const rsvpDeadlinePassed = publicEvent?.prazo_rsvp ? new Date() > new Date(publicEvent.prazo_rsvp) : false;
+    const showRSVP = user.status === 'ativo' && !user.rsvp_status;
+    
     const PENDING_IMAGE = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?q=80&w=1000&auto=format&fit=crop";
     const PAID_IMAGE = "https://images.unsplash.com/photo-1513151233558-d860c5398176?q=80&w=1000&auto=format&fit=crop";
 
@@ -1614,6 +1654,61 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-1 gap-6 mb-8">
+            {/* RSVP Section */}
+            {showRSVP && (
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-blue-600 rounded-3xl p-6 md:p-8 shadow-xl shadow-blue-600/20 text-white relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 p-8 opacity-10">
+                  <Clock className="size-32 rotate-12" />
+                </div>
+                <div className="relative z-10">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="bg-white/20 p-2 rounded-xl backdrop-blur-md">
+                      <Bell className="size-6" />
+                    </div>
+                    <h3 className="text-xl md:text-2xl font-black uppercase tracking-tight">Confirmação de Presença</h3>
+                  </div>
+                  <p className="text-blue-100 text-sm md:text-base mb-6 max-w-xl">
+                    Sua solicitação foi aprovada! Agora, para garantir sua vaga na Resenha, você precisa confirmar sua presença.
+                    {publicEvent?.prazo_rsvp && (
+                      <span className="block mt-2 font-bold text-white">
+                        Prazo limite: {new Date(publicEvent.prazo_rsvp).toLocaleString('pt-BR')}
+                      </span>
+                    )}
+                  </p>
+                  
+                  {rsvpDeadlinePassed ? (
+                    <div className="bg-white/10 border border-white/20 p-4 rounded-2xl backdrop-blur-md flex items-center gap-3">
+                      <XCircle className="size-6 text-white" />
+                      <p className="font-black uppercase tracking-widest text-sm">O prazo para confirmação expirou</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col md:flex-row gap-4">
+                      <button 
+                        onClick={() => handleRSVP('confirm')}
+                        disabled={loading}
+                        className="flex-1 bg-white text-blue-600 hover:bg-blue-50 font-black py-4 rounded-2xl transition-all shadow-lg shadow-black/10 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
+                      >
+                        {loading ? 'Processando...' : 'Confirmar Presença'}
+                        <Check className="size-5" />
+                      </button>
+                      <button 
+                        onClick={() => handleRSVP('decline')}
+                        disabled={loading}
+                        className="flex-1 bg-blue-700/50 hover:bg-blue-700 text-white font-black py-4 rounded-2xl transition-all border border-white/20 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
+                      >
+                        Não poderei ir
+                        <X className="size-5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+
             {/* Bloco de Saldo */}
             <div className="bg-white rounded-3xl p-5 md:p-8 shadow-sm border border-slate-100 flex flex-col md:flex-row items-center justify-between gap-6">
               <div className="flex items-center gap-6 w-full md:w-auto">
@@ -2166,11 +2261,11 @@ export default function App() {
                       <p className="text-slate-500 text-sm font-medium">Ocupação do Evento</p>
                       <h3 className="text-2xl md:text-3xl font-black text-slate-900">
                         {adminStats.confirmedCount}
-                        <span className="text-slate-400 text-sm md:text-base font-medium ml-2">/ {adminStats.capacity} confirmados</span>
+                        <span className="text-slate-400 text-sm md:text-base font-medium ml-2">/ {adminStats.capacity} Confirmados (RSVP)</span>
                       </h3>
                       <div className="w-full bg-slate-100 h-2 rounded-full mt-2 overflow-hidden">
                         <div 
-                          className="h-full bg-blue-600 transition-all duration-500" 
+                          className={`h-full transition-all duration-500 ${adminStats.confirmedCount >= adminStats.capacity ? 'bg-red-500' : 'bg-blue-600'}`} 
                           style={{ width: `${Math.min(100, (adminStats.confirmedCount / adminStats.capacity) * 100)}%` }}
                         ></div>
                       </div>
@@ -3114,7 +3209,7 @@ export default function App() {
                             required
                           />
                           <Input 
-                            label="Capacidade" 
+                            label="Lotação Máxima do Evento" 
                             icon={Users} 
                             type="number"
                             value={configForm.event.capacidade_maxima || 50}
@@ -3128,6 +3223,13 @@ export default function App() {
                             value={configForm.event.limite_acompanhantes || 4}
                             onChange={(e: any) => setConfigForm({ ...configForm, event: { ...configForm.event, limite_acompanhantes: Number(e.target.value) } })}
                             required
+                          />
+                          <Input 
+                            label="Prazo Limite para Confirmação" 
+                            icon={Clock} 
+                            type="datetime-local"
+                            value={configForm.event.prazo_rsvp || ''}
+                            onChange={(e: any) => setConfigForm({ ...configForm, event: { ...configForm.event, prazo_rsvp: e.target.value } })}
                           />
                         </div>
                         <Input 
