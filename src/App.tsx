@@ -45,7 +45,8 @@ import {
   RefreshCw,
   Key,
   Info,
-  Send
+  Send,
+  Camera
 } from 'lucide-react';
 
 // Types
@@ -61,6 +62,7 @@ interface UserData {
   status?: 'ativo' | 'pendente' | 'recusado';
   companion_count?: number;
   companions?: { nome: string; instagram?: string }[];
+  foto_perfil?: string;
 }
 
 interface Companion {
@@ -165,6 +167,86 @@ const Input = ({ label, icon: Icon, id, ...props }: any) => (
     </div>
   </div>
 );
+
+const ProfileAvatar = ({ user, size = 'md', onUpdate, showToast }: { 
+  user: UserData, 
+  size?: 'sm' | 'md' | 'lg', 
+  onUpdate: (newUrl: string) => void,
+  showToast: (msg: string, type?: 'success' | 'error') => void
+}) => {
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = React.useState(false);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('A imagem deve ter no máximo 5MB', 'error');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      setUploading(true);
+      try {
+        const res = await fetch('/api/user/profile-picture', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: user.id, imageBase64: reader.result })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          onUpdate(data.fotoUrl);
+          showToast('Foto de perfil atualizada!');
+        } else {
+          showToast(data.error || 'Erro ao atualizar foto', 'error');
+        }
+      } catch (err) {
+        showToast('Erro de conexão', 'error');
+      } finally {
+        setUploading(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const sizeClasses = {
+    sm: 'size-8 md:size-10',
+    md: 'size-10 md:size-12',
+    lg: 'size-20 md:size-24'
+  };
+
+  const iconSize = size === 'lg' ? 'size-6' : 'size-4';
+
+  return (
+    <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+      <div className={`${sizeClasses[size]} rounded-full overflow-hidden border-2 border-white/20 shadow-lg relative`}>
+        {uploading && (
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-10">
+            <RefreshCw className="size-4 text-white animate-spin" />
+          </div>
+        )}
+        <img 
+          src={user.foto_perfil || `https://picsum.photos/seed/${user.id}/200`} 
+          alt="Perfil" 
+          className="w-full h-full object-cover"
+          referrerPolicy="no-referrer"
+        />
+        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+          <Camera className={iconSize + " text-white"} />
+        </div>
+      </div>
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        className="hidden" 
+        accept="image/*" 
+        onChange={handleFileChange} 
+      />
+    </div>
+  );
+};
 
 export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -1456,9 +1538,12 @@ export default function App() {
             <button className="p-2 rounded-lg bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-600 transition-all">
               <Bell className="size-4 md:size-5" />
             </button>
-            <div className="size-8 md:size-10 rounded-full border-2 border-amber-400 overflow-hidden shrink-0">
-              <img src={`https://picsum.photos/seed/${user.id}/100`} alt="Perfil" referrerPolicy="no-referrer" />
-            </div>
+            <ProfileAvatar 
+              user={user} 
+              size="sm" 
+              showToast={showToast} 
+              onUpdate={(newUrl) => setUser(prev => prev ? { ...prev, foto_perfil: newUrl } : null)} 
+            />
             <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 transition-all">
               <LogOut className="size-4 md:size-5" />
             </button>
@@ -1932,9 +2017,12 @@ export default function App() {
           <div className="p-6">
             <div className="bg-white/10 rounded-xl p-4 border border-white/5">
               <div className="flex items-center gap-3 mb-3">
-                <div className="size-10 rounded-full bg-slate-300 overflow-hidden ring-2 ring-white/20">
-                  <img src={`https://picsum.photos/seed/${user.id}/100`} alt="Administrador" referrerPolicy="no-referrer" />
-                </div>
+                <ProfileAvatar 
+                  user={user} 
+                  size="sm" 
+                  showToast={showToast} 
+                  onUpdate={(newUrl) => setUser(prev => prev ? { ...prev, foto_perfil: newUrl } : null)} 
+                />
                 <div className="truncate">
                   <p className="text-white text-sm font-semibold truncate">{user.nome}</p>
                   <p className="text-white/50 text-[10px]">Organizador</p>

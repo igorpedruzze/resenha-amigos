@@ -6,6 +6,7 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
+import sharp from "sharp";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,12 +14,16 @@ const __dirname = path.dirname(__filename);
 // Ensure database and upload directories exist
 const dbDir = process.env.DB_PATH || path.join(__dirname, "data");
 const uploadDir = path.join(dbDir, "uploads");
+const perfilDir = path.join(dbDir, "perfil");
 
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
+}
+if (!fs.existsSync(perfilDir)) {
+  fs.mkdirSync(perfilDir, { recursive: true });
 }
 
 // Migration: Move files from old 'database' folder to new 'data' folder if 'database' exists
@@ -349,6 +354,10 @@ async function startServer() {
     db.exec("ALTER TABLE eventos ADD COLUMN flyer_info TEXT");
   } catch (e) {}
 
+  try {
+    db.exec("ALTER TABLE usuarios ADD COLUMN foto_perfil TEXT");
+  } catch (e) {}
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS pagamentos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -597,6 +606,7 @@ async function startServer() {
   
   // Serve uploaded files
   app.use('/uploads', express.static(uploadDir));
+  app.use('/perfil', express.static(perfilDir));
 
   // Helper to get current active event
   const getActiveEvent = () => db.prepare("SELECT * FROM eventos LIMIT 1").get() as any;
@@ -884,6 +894,40 @@ async function startServer() {
       info_texto: event.info_texto || "",
       flyer_info: event.flyer_info || ""
     });
+  });
+
+  app.post("/api/user/profile-picture", async (req, res) => {
+    const { userId, imageBase64 } = req.body;
+    if (!userId || !imageBase64) return res.status(400).json({ error: "Dados incompletos" });
+
+    try {
+      const user = db.prepare("SELECT id, nome, role, codigo_convidado FROM usuarios WHERE id = ?").get(userId) as any;
+      if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
+
+      const matches = imageBase64.match(/^data:image\/([A-Za-z-+/]+);base64,(.+)$/);
+      if (!matches || matches.length !== 3) return res.status(400).json({ error: "Formato de imagem inválido" });
+
+      const buffer = Buffer.from(matches[2], 'base64');
+      const type = user.role === 'admin' ? 'admin' : 'convidado';
+      const identifier = user.role === 'admin' ? user.id : (user.codigo_convidado || user.id);
+      const fileName = `perfil_${type}_${identifier}.jpg`;
+      const filePath = path.join(perfilDir, fileName);
+
+      await sharp(buffer)
+        .resize(200, 200, { fit: 'cover' })
+        .toFormat('jpeg')
+        .jpeg({ quality: 80 })
+        .toFile(filePath);
+
+      const fotoUrl = `/perfil/${fileName}?t=${Date.now()}`;
+      db.prepare("UPDATE usuarios SET foto_perfil = ? WHERE id = ?").run(fotoUrl, userId);
+
+      addLog(userId, user.nome || 'Usuário', 'Foto de Perfil', `Usuário atualizou sua foto de perfil.`);
+      res.json({ success: true, fotoUrl });
+    } catch (error: any) {
+      console.error("Profile picture upload error:", error);
+      res.status(500).json({ error: "Erro ao processar imagem" });
+    }
   });
 
   // Submit Payment Receipt
