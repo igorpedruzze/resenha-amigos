@@ -1112,7 +1112,7 @@ export default function App() {
               <div className="w-full max-w-lg aspect-[3/4] bg-gradient-to-br from-blue-600 to-blue-800 rounded-3xl flex flex-col items-center justify-center text-white p-6 md:p-12 text-center mb-8 shadow-2xl">
                 <PartyPopper className="size-16 md:size-24 mb-4 md:mb-6 opacity-50" />
                 <h1 className="text-2xl md:text-4xl font-black mb-2 md:mb-4 uppercase tracking-tighter">{publicEvent?.nome || 'Minha Resenha de Aniversário'}</h1>
-                <p className="text-blue-100 text-sm md:text-base font-medium">Bora comemorar mais um ano de vida!</p>
+                <p className="text-blue-100 text-sm md:text-base font-medium">Vibe Infinita... Essa Vibe é nossa!</p>
               </div>
             )}
 
@@ -1149,8 +1149,8 @@ export default function App() {
                   {view === 'reset-password' && 'Nova Senha'}
                 </h2>
                 <p className="text-slate-500 font-medium">
-                  {view === 'signup' && 'Preencha os dados abaixo para não ficar de fora do meu niver!'}
-                  {view === 'login' && 'Acesse seu painel para ver o saldo e novidades.'}
+                  {view === 'signup' && 'Preencha os dados abaixo para não ficar de fora dessa resenha!'}
+                  {view === 'login' && 'Acesse seu painel para ter informações atualizadas.'}
                   {view === 'forgot-password' && 'Informe seu e-mail para receber o link de recuperação.'}
                   {view === 'reset-password' && 'Crie uma nova senha segura para sua conta.'}
                 </p>
