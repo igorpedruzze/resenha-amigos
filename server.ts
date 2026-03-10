@@ -199,6 +199,7 @@ async function startServer() {
       system_url TEXT,
       info_texto TEXT,
       flyer_info TEXT,
+      limite_acompanhantes INTEGER DEFAULT 4,
       tpl_welcome TEXT,
       tpl_approval_guest TEXT,
       tpl_approval_companion TEXT,
@@ -217,6 +218,7 @@ async function startServer() {
       role TEXT DEFAULT 'guest',
       valor_total REAL,
       codigo_convidado TEXT UNIQUE,
+      acompanhantes_count INTEGER DEFAULT 0,
       status TEXT DEFAULT 'ativo' -- 'ativo', 'pendente', 'recusado'
     );
 
@@ -225,7 +227,13 @@ async function startServer() {
   `);
 
   try {
+    db.exec("ALTER TABLE usuarios ADD COLUMN acompanhantes_count INTEGER DEFAULT 0");
+  } catch (e) {}
+  try {
     db.exec("ALTER TABLE eventos ADD COLUMN tpl_welcome TEXT");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE eventos ADD COLUMN limite_acompanhantes INTEGER DEFAULT 4");
   } catch (e) {}
   try {
     db.exec("ALTER TABLE eventos ADD COLUMN tpl_approval_guest TEXT");
@@ -719,12 +727,13 @@ async function startServer() {
       valor: event.valor_por_pessoa,
       flyer_landing: event.flyer_landing,
       flyer_landing_mobile: event.flyer_landing_mobile,
-      flyer_dashboard: event.flyer_dashboard
+      flyer_dashboard: event.flyer_dashboard,
+      limite_acompanhantes: event.limite_acompanhantes || 4
     });
   });
 
   app.post("/api/auth/signup", (req, res) => {
-    let { name, email, whatsapp, instagram, password } = req.body;
+    let { name, email, whatsapp, instagram, password, companionsCount } = req.body;
 
     name = sanitize(name);
     email = sanitize(email);
@@ -733,6 +742,15 @@ async function startServer() {
 
     if (!name || !email || !whatsapp || !password) {
       return res.status(400).json({ error: "Nome, E-mail, WhatsApp e Senha são obrigatórios." });
+    }
+
+    // Validate companions count
+    const event = getActiveEvent();
+    const limit = event?.limite_acompanhantes || 4;
+    const count = parseInt(companionsCount) || 0;
+
+    if (count > limit) {
+      return res.status(400).json({ error: `Desculpe, cada convidado pode levar no máximo ${limit} acompanhantes para garantir o conforto de todos na Resenha.` });
     }
 
     // Duplicity check
@@ -757,15 +775,15 @@ async function startServer() {
       });
     }
 
-    const event = getActiveEvent();
-    const defaultValue = event ? event.valor_por_pessoa : 0;
+    const perPerson = event ? event.valor_por_pessoa : 0;
+    const defaultValue = perPerson * (1 + count);
     const guestCode = generateGuestCode();
     try {
       const salt = bcrypt.genSaltSync(10);
       const hash = bcrypt.hashSync(password, salt);
       const result = db.prepare(
-        "INSERT INTO usuarios (nome, email, whatsapp, instagram, senha_hash, role, valor_total, status, codigo_convidado) VALUES (?, ?, ?, ?, ?, 'guest', ?, 'pendente', ?)"
-      ).run(name, email, whatsapp, instagram, hash, defaultValue, guestCode);
+        "INSERT INTO usuarios (nome, email, whatsapp, instagram, senha_hash, role, valor_total, status, codigo_convidado, acompanhantes_count) VALUES (?, ?, ?, ?, ?, 'guest', ?, 'pendente', ?, ?)"
+      ).run(name, email, whatsapp, instagram, hash, defaultValue, guestCode, count);
       
       const user = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(result.lastInsertRowid) as any;
       if (user && !user.role) user.role = 'guest';
@@ -1043,8 +1061,9 @@ async function startServer() {
 
     try {
       const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
-      db.prepare("UPDATE usuarios SET valor_total = ? WHERE role = 'guest'").run(Number(valor));
-      addLog(admin?.id || null, admin?.nome || 'Adm', 'Atualização em Massa', `Adm ${admin?.nome} atualizou o valor de todos os convidados para R$ ${valor}.`);
+      // Atualiza o valor total considerando o valor base por pessoa e a quantidade de acompanhantes declarada no cadastro
+      db.prepare("UPDATE usuarios SET valor_total = ? * (1 + acompanhantes_count) WHERE role = 'guest'").run(Number(valor));
+      addLog(admin?.id || null, admin?.nome || 'Adm', 'Atualização em Massa', `Adm ${admin?.nome} atualizou o valor base de todos os convidados para R$ ${valor}. O total de cada um foi recalculado com base nos acompanhantes.`);
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1054,7 +1073,7 @@ async function startServer() {
   // Guest Management Endpoints
   app.get("/api/admin/guests", (req, res) => {
     const guests = db.prepare(`
-      SELECT u.id, u.nome, u.email, u.whatsapp, u.instagram, u.confirmado, u.valor_total, u.codigo_convidado, u.status,
+      SELECT u.id, u.nome, u.email, u.whatsapp, u.instagram, u.confirmado, u.valor_total, u.codigo_convidado, u.status, u.acompanhantes_count,
       (SELECT COUNT(*) FROM acompanhantes WHERE usuario_id = u.id) as companion_count
       FROM usuarios u 
       WHERE u.role = 'guest' 
@@ -1085,10 +1104,13 @@ async function startServer() {
     }
 
     try {
+      // Get limit from config
+      const limit = event?.limite_acompanhantes || 4;
+
       // Check limit
       const count = db.prepare("SELECT COUNT(*) as count FROM acompanhantes WHERE usuario_id = ?").get(userId) as any;
-      if (count.count >= 4) {
-        return res.status(400).json({ error: "Limite de 4 acompanhantes atingido." });
+      if (count.count >= limit) {
+        return res.status(400).json({ error: `Desculpe, cada convidado pode levar no máximo ${limit} acompanhantes para garantir o conforto de todos na Resenha.` });
       }
 
       // Check if user has already paid (cannot add companions if paid/quitado)
@@ -1127,8 +1149,15 @@ async function startServer() {
       
       // Update guest total value
       const guest = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(companion.usuario_id) as any;
-      const newValue = (guest?.valor_total || 0) + event.valor_por_pessoa;
-      db.prepare("UPDATE usuarios SET valor_total = ? WHERE id = ?").run(newValue, companion.usuario_id);
+      const approvedCount = db.prepare("SELECT COUNT(*) as count FROM acompanhantes WHERE usuario_id = ? AND status = 'aprovado' AND id != ?").get(companion.usuario_id, id) as any;
+      
+      // Se o número de acompanhantes já aprovados for maior ou igual ao número inicial declarado no cadastro,
+      // cada novo acompanhante aprovado incrementa o valor total.
+      // Caso contrário, o valor já estava embutido no valor_total inicial.
+      if (approvedCount.count >= (guest.acompanhantes_count || 0)) {
+        const newValue = (guest?.valor_total || 0) + event.valor_por_pessoa;
+        db.prepare("UPDATE usuarios SET valor_total = ? WHERE id = ?").run(newValue, companion.usuario_id);
+      }
       
       const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
       addLog(admin?.id || null, admin?.nome || 'Adm', 'Aprovação de Acompanhante', `Adm ${admin?.nome} aprovou o acompanhante ${companion.nome}. Valor total atualizado.`);
@@ -1229,7 +1258,7 @@ async function startServer() {
   });
 
   app.post("/api/admin/guests", (req, res) => {
-    let { nome, email, whatsapp, instagram, password, valor_total } = req.body;
+    let { nome, email, whatsapp, instagram, password, valor_total, acompanhantes_count } = req.body;
     
     nome = sanitize(nome);
     email = sanitize(email);
@@ -1237,14 +1266,16 @@ async function startServer() {
     instagram = sanitize(instagram);
 
     const event = getActiveEvent();
-    const finalValue = valor_total !== undefined ? valor_total : (event ? event.valor_por_pessoa : 0);
+    const count = parseInt(acompanhantes_count) || 0;
+    const perPerson = event ? event.valor_por_pessoa : 0;
+    const finalValue = valor_total !== undefined ? Number(valor_total) : (perPerson * (1 + count));
     const guestCode = generateGuestCode();
     try {
       const salt = bcrypt.genSaltSync(10);
       const hash = bcrypt.hashSync(password || '123456', salt);
       const result = db.prepare(
-        "INSERT INTO usuarios (nome, email, whatsapp, instagram, senha_hash, role, valor_total, codigo_convidado) VALUES (?, ?, ?, ?, ?, 'guest', ?, ?)"
-      ).run(nome, email, whatsapp, instagram, hash, finalValue, guestCode);
+        "INSERT INTO usuarios (nome, email, whatsapp, instagram, senha_hash, role, valor_total, codigo_convidado, acompanhantes_count) VALUES (?, ?, ?, ?, ?, 'guest', ?, ?, ?)"
+      ).run(nome, email, whatsapp, instagram, hash, finalValue, guestCode, count);
       const guest = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(result.lastInsertRowid) as any;
       const admin = db.prepare("SELECT nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
       addLog(admin?.id || null, admin?.nome || 'Adm', 'Criação de Convidado', `Adm ${admin?.nome} cadastrou o convidado ${nome} com valor de R$ ${finalValue}.`);
@@ -1255,13 +1286,13 @@ async function startServer() {
   });
 
   app.put("/api/admin/guests/:id", (req, res) => {
-    const { nome, email, whatsapp, instagram, valor_total } = req.body;
+    const { nome, email, whatsapp, instagram, valor_total, acompanhantes_count } = req.body;
     const { id } = req.params;
     try {
       const oldGuest = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(id) as any;
       db.prepare(
-        "UPDATE usuarios SET nome = ?, email = ?, whatsapp = ?, instagram = ?, valor_total = ? WHERE id = ?"
-      ).run(nome, email, whatsapp, instagram, valor_total, id);
+        "UPDATE usuarios SET nome = ?, email = ?, whatsapp = ?, instagram = ?, valor_total = ?, acompanhantes_count = ? WHERE id = ?"
+      ).run(nome, email, whatsapp, instagram, valor_total, acompanhantes_count, id);
       
       const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
       let msg = `Adm ${admin?.nome} alterou dados de ${nome}.`;
@@ -1587,7 +1618,8 @@ async function startServer() {
         from_email: event.from_email || "",
         system_url: event.system_url || "",
         info_texto: event.info_texto || "",
-        flyer_info: event.flyer_info || ""
+        flyer_info: event.flyer_info || "",
+        limite_acompanhantes: event.limite_acompanhantes || 4
       },
       organizador: {
         nome: admin.nome,
@@ -1630,7 +1662,8 @@ async function startServer() {
             email_method = ?,
             resend_api_key = ?,
             from_email = ?,
-            system_url = ?
+            system_url = ?,
+            limite_acompanhantes = ?
           WHERE id = ?
         `).run(
           event.nome, 
@@ -1652,6 +1685,7 @@ async function startServer() {
           event.resend_api_key,
           event.from_email,
           event.system_url,
+          event.limite_acompanhantes || 4,
           activeEvent.id
         );
 

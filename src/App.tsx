@@ -61,6 +61,7 @@ interface UserData {
   codigo_convidado?: string;
   status?: 'ativo' | 'pendente' | 'recusado';
   companion_count?: number;
+  acompanhantes_count?: number;
   companions?: { nome: string; instagram?: string }[];
   foto_perfil?: string;
 }
@@ -93,6 +94,7 @@ interface EventConfig {
   system_url?: string;
   info_texto?: string;
   flyer_info?: string;
+  limite_acompanhantes?: number;
 }
 
 interface OrganizerConfig {
@@ -285,7 +287,8 @@ export default function App() {
     whatsapp: '',
     instagram: '',
     password: '',
-    valor_total: ''
+    valor_total: '',
+    acompanhantes_count: 0
   });
   const [logSearchId, setLogSearchId] = useState('');
   const [adminPixInput, setAdminPixInput] = useState('');
@@ -305,7 +308,8 @@ export default function App() {
       from_email: '',
       system_url: '',
       info_texto: '',
-      flyer_info: ''
+      flyer_info: '',
+      limite_acompanhantes: 4
     },
     organizador: { nome: '', email: '', whatsapp: '' }
   });
@@ -355,7 +359,8 @@ export default function App() {
     whatsapp: '',
     instagram: '',
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
+    companionsCount: 0
   });
   const [loginData, setLoginData] = useState({
     email: '',
@@ -675,7 +680,8 @@ export default function App() {
           email: signupData.email,
           whatsapp: signupData.whatsapp,
           instagram: signupData.instagram,
-          password: signupData.password
+          password: signupData.password,
+          companionsCount: signupData.companionsCount
         })
       });
       const data = await res.json();
@@ -936,7 +942,8 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...guestFormData,
-        valor_total: guestFormData.valor_total ? Number(guestFormData.valor_total) : undefined
+        valor_total: guestFormData.valor_total ? Number(guestFormData.valor_total) : undefined,
+        acompanhantes_count: guestFormData.acompanhantes_count
       })
     });
     
@@ -946,7 +953,7 @@ export default function App() {
       fetchAdminStats(); // Refresh stats too
       setShowGuestForm(false);
       setEditingGuest(null);
-      setGuestFormData({ nome: '', email: '', whatsapp: '', instagram: '', password: '', valor_total: '' });
+      setGuestFormData({ nome: '', email: '', whatsapp: '', instagram: '', password: '', valor_total: '', acompanhantes_count: 0 });
     } else {
       const data = await res.json();
       showToast(data.error || 'Erro ao salvar convidado', 'error');
@@ -1395,6 +1402,45 @@ export default function App() {
                       onChange={(e: any) => setSignupData({...signupData, instagram: e.target.value})}
                     />
                   </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-black text-slate-700 uppercase tracking-widest ml-1">Quantidade de Acompanhantes</label>
+                    <div className="relative">
+                      <Users className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 size-5" />
+                      <input 
+                        type="number"
+                        min="0"
+                        max={publicEvent?.limite_acompanhantes || 4}
+                        value={signupData.companionsCount}
+                        onChange={(e: any) => {
+                          const val = parseInt(e.target.value) || 0;
+                          const limit = publicEvent?.limite_acompanhantes || 4;
+                          if (val > limit) {
+                            showToast(`O limite máximo de acompanhantes para este evento é ${limit}`, 'error');
+                            setSignupData({...signupData, companionsCount: limit});
+                          } else {
+                            setSignupData({...signupData, companionsCount: val});
+                          }
+                        }}
+                        className="w-full pl-12 pr-4 py-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none font-bold text-base"
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-medium ml-1">Máximo permitido: {publicEvent?.limite_acompanhantes || 4}</p>
+                  </div>
+
+                  <div className="bg-blue-600/5 p-4 rounded-2xl border border-blue-600/10 flex items-center justify-between">
+                    <div>
+                      <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Valor Total do Convite</p>
+                      <p className="text-2xl font-black text-slate-900">
+                        {formatCurrency((publicEvent?.valor || 0) * (1 + signupData.companionsCount))}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Pessoas</p>
+                      <p className="font-bold text-slate-700">{1 + signupData.companionsCount}</p>
+                    </div>
+                  </div>
+
                   <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 mb-2">
                     <div className="flex items-start gap-2">
                       <Info className="size-4 text-blue-600 mt-0.5 shrink-0" />
@@ -1769,18 +1815,18 @@ export default function App() {
               <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4">
                 <div className="flex-1">
                   <h3 className="text-xl font-black text-slate-900">Meus Acompanhantes</h3>
-                  <p className="text-slate-500 text-xs">Adicione pessoas que irão com você (máx 4).</p>
+                  <p className="text-slate-500 text-xs">Adicione pessoas que irão com você (máx {publicEvent?.limite_acompanhantes || 4}).</p>
                   <p className="text-[10px] text-blue-600 font-bold mt-1 leading-tight">
                     Ao adicionar um acompanhante, o valor de {formatCurrency(publicEvent?.valor || 0)} será somado ao seu saldo devedor após a aprovação do administrador.
                   </p>
                 </div>
                 <button 
                   onClick={() => setShowCompanionForm(true)}
-                  disabled={companions.length >= 4}
+                  disabled={companions.length >= (publicEvent?.limite_acompanhantes || 4)}
                   className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-3 md:px-4 md:py-2 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-blue-600/20 disabled:opacity-50 w-full md:w-auto"
                 >
                   <Plus className="size-4" />
-                  {companions.length >= 4 ? 'Limite Atingido' : 'Adicionar'}
+                  {companions.length >= (publicEvent?.limite_acompanhantes || 4) ? 'Limite Atingido' : 'Adicionar'}
                 </button>
               </div>
 
@@ -2401,7 +2447,8 @@ export default function App() {
                           whatsapp: '', 
                           instagram: '', 
                           password: '',
-                          valor_total: config?.event.valor.toString() || ''
+                          valor_total: config?.event.valor.toString() || '',
+                          acompanhantes_count: 0
                         });
                         setShowGuestForm(true);
                       }}
@@ -2707,7 +2754,8 @@ export default function App() {
                                             whatsapp: g.whatsapp || '',
                                             instagram: g.instagram || '',
                                             password: '',
-                                            valor_total: g.valor_total?.toString() || ''
+                                            valor_total: g.valor_total?.toString() || '',
+                                            acompanhantes_count: g.acompanhantes_count || 0
                                           });
                                           setShowGuestForm(true);
                                         }}
@@ -3068,6 +3116,14 @@ export default function App() {
                             type="number"
                             value={configForm.event.capacidade_maxima || 50}
                             onChange={(e: any) => setConfigForm({ ...configForm, event: { ...configForm.event, capacidade_maxima: Number(e.target.value) } })}
+                            required
+                          />
+                          <Input 
+                            label="Limite de Acompanhantes" 
+                            icon={Users} 
+                            type="number"
+                            value={configForm.event.limite_acompanhantes || 4}
+                            onChange={(e: any) => setConfigForm({ ...configForm, event: { ...configForm.event, limite_acompanhantes: Number(e.target.value) } })}
                             required
                           />
                         </div>
@@ -3444,18 +3500,40 @@ export default function App() {
                       onChange={(e: any) => setGuestFormData({...guestFormData, instagram: e.target.value})}
                     />
                   </div>
-                  <Input 
-                    id="guest_value"
-                    name="value"
-                    label="Valor do Convite (R$)" 
-                    icon={Wallet} 
-                    type="number"
-                    step="0.01"
-                    placeholder={config?.event.valor.toString()}
-                    value={guestFormData.valor_total}
-                    onChange={(e: any) => setGuestFormData({...guestFormData, valor_total: e.target.value})}
-                    required
-                  />
+                  <div className="grid grid-cols-2 gap-4">
+                    <Input 
+                      id="guest_value"
+                      name="value"
+                      label="Valor Convite (R$)" 
+                      icon={Wallet} 
+                      type="number"
+                      step="0.01"
+                      placeholder={config?.event.valor.toString()}
+                      value={guestFormData.valor_total}
+                      onChange={(e: any) => setGuestFormData({...guestFormData, valor_total: e.target.value})}
+                      required
+                    />
+                    <Input 
+                      id="guest_companions"
+                      name="companions"
+                      label="Qtd Acomp." 
+                      icon={Users} 
+                      type="number"
+                      min="0"
+                      max={config?.event.limite_acompanhantes || 4}
+                      value={guestFormData.acompanhantes_count || 0}
+                      onChange={(e: any) => {
+                        const val = parseInt(e.target.value) || 0;
+                        const limit = config?.event.limite_acompanhantes || 4;
+                        if (val > limit) {
+                          showToast(`O limite máximo de acompanhantes para este evento é ${limit}`, 'error');
+                          setGuestFormData({...guestFormData, acompanhantes_count: limit});
+                        } else {
+                          setGuestFormData({...guestFormData, acompanhantes_count: val});
+                        }
+                      }}
+                    />
+                  </div>
                   {!editingGuest && (
                     <Input 
                       id="user_secure_password"
