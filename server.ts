@@ -7,6 +7,9 @@ import { fileURLToPath } from "url";
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
 import sharp from "sharp";
+import bcrypt from "bcryptjs";
+import session from "express-session";
+import { randomBytes } from "crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -476,12 +479,27 @@ async function startServer() {
 
   const adminExists = db.prepare("SELECT * FROM usuarios WHERE role = 'admin'").get();
   if (!adminExists) {
+    const salt = bcrypt.genSaltSync(10);
+    const hash = bcrypt.hashSync("imp598", salt);
     db.prepare("INSERT INTO usuarios (nome, email, senha_hash, role) VALUES (?, ?, ?, ?)").run(
       "Admin",
       "igorpedruzze@gmail.com",
-      "imp598",
+      hash,
       "admin"
     );
+  }
+
+  // Migration: Ensure all passwords are BCrypt
+  const allUsers = db.prepare("SELECT id, senha_hash FROM usuarios").all() as any[];
+  const updatePass = db.prepare("UPDATE usuarios SET senha_hash = ? WHERE id = ?");
+  for (const u of allUsers) {
+    // BCrypt hashes usually start with $2a$ or $2b$
+    if (!u.senha_hash.startsWith('$2a$') && !u.senha_hash.startsWith('$2b$')) {
+      const salt = bcrypt.genSaltSync(10);
+      const hash = bcrypt.hashSync(u.senha_hash, salt);
+      updatePass.run(hash, u.id);
+      console.log(`Migrated password to BCrypt for user ID: ${u.id}`);
+    }
   }
 
   // Email helper
@@ -600,13 +618,40 @@ async function startServer() {
     return content;
   }
 
+  // Sanitization helper
+  const sanitize = (str: string) => {
+    if (!str || typeof str !== 'string') return str;
+    return str.trim().replace(/[<>]/g, ''); // Basic XSS prevention, prepared statements handle SQLi
+  };
+
   const app = express();
   app.use(express.json({ limit: '15mb' }));
   app.use(express.urlencoded({ limit: '15mb', extended: true }));
+
+  // Session configuration
+  const sessionSecret = process.env.SESSION_SECRET || randomBytes(32).toString('hex');
+  app.use(session({
+    secret: sessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    }
+  }));
   
+  // Prevent directory listing middleware
+  const noDirectoryListing = (req: any, res: any, next: any) => {
+    if (req.url.endsWith('/')) {
+      return res.status(403).send('Acesso negado');
+    }
+    next();
+  };
+
   // Serve uploaded files
-  app.use('/uploads', express.static(uploadDir));
-  app.use('/perfil', express.static(perfilDir));
+  app.use('/uploads', noDirectoryListing, express.static(uploadDir));
+  app.use('/perfil', noDirectoryListing, express.static(perfilDir));
 
   // Helper to get current active event
   const getActiveEvent = () => db.prepare("SELECT * FROM eventos LIMIT 1").get() as any;
@@ -679,7 +724,12 @@ async function startServer() {
   });
 
   app.post("/api/auth/signup", (req, res) => {
-    const { name, email, whatsapp, instagram, password } = req.body;
+    let { name, email, whatsapp, instagram, password } = req.body;
+
+    name = sanitize(name);
+    email = sanitize(email);
+    whatsapp = sanitize(whatsapp);
+    instagram = sanitize(instagram);
 
     if (!name || !email || !whatsapp || !password) {
       return res.status(400).json({ error: "Nome, E-mail, WhatsApp e Senha são obrigatórios." });
@@ -711,9 +761,11 @@ async function startServer() {
     const defaultValue = event ? event.valor_por_pessoa : 0;
     const guestCode = generateGuestCode();
     try {
+      const salt = bcrypt.genSaltSync(10);
+      const hash = bcrypt.hashSync(password, salt);
       const result = db.prepare(
         "INSERT INTO usuarios (nome, email, whatsapp, instagram, senha_hash, role, valor_total, status, codigo_convidado) VALUES (?, ?, ?, ?, ?, 'guest', ?, 'pendente', ?)"
-      ).run(name, email, whatsapp, instagram, password, defaultValue, guestCode);
+      ).run(name, email, whatsapp, instagram, hash, defaultValue, guestCode);
       
       const user = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(result.lastInsertRowid) as any;
       if (user && !user.role) user.role = 'guest';
@@ -826,7 +878,9 @@ async function startServer() {
         });
       }
 
-      db.prepare("UPDATE usuarios SET senha_hash = ?, reset_token = NULL, reset_token_expires = NULL WHERE id = ?").run(newPassword, user.id);
+      const salt = bcrypt.genSaltSync(10);
+      const hash = bcrypt.hashSync(newPassword, salt);
+      db.prepare("UPDATE usuarios SET senha_hash = ?, reset_token = NULL, reset_token_expires = NULL WHERE id = ?").run(hash, user.id);
       
       addLog(user.id, user.nome, 'Senha Redefinida', `O usuário ${user.nome} redefiniu sua senha com sucesso.`);
       
@@ -839,8 +893,8 @@ async function startServer() {
   app.post("/api/auth/login", (req, res) => {
     const { email, password } = req.body;
     try {
-      const user = db.prepare("SELECT * FROM usuarios WHERE LOWER(email) = LOWER(?) AND senha_hash = ?").get(email, password) as any;
-      if (user) {
+      const user = db.prepare("SELECT * FROM usuarios WHERE LOWER(email) = LOWER(?)").get(email) as any;
+      if (user && bcrypt.compareSync(password, user.senha_hash)) {
         // Ensure role is set
         if (!user.role) user.role = 'guest';
 
@@ -852,6 +906,10 @@ async function startServer() {
             return res.status(403).json({ error: "Sua solicitação de cadastro foi recusada pelo organizador." });
           }
         }
+
+        // Set session
+        (req.session as any).userId = user.id;
+        (req.session as any).userRole = user.role;
 
         res.json(user);
       } else {
@@ -1171,14 +1229,22 @@ async function startServer() {
   });
 
   app.post("/api/admin/guests", (req, res) => {
-    const { nome, email, whatsapp, instagram, password, valor_total } = req.body;
+    let { nome, email, whatsapp, instagram, password, valor_total } = req.body;
+    
+    nome = sanitize(nome);
+    email = sanitize(email);
+    whatsapp = sanitize(whatsapp);
+    instagram = sanitize(instagram);
+
     const event = getActiveEvent();
     const finalValue = valor_total !== undefined ? valor_total : (event ? event.valor_por_pessoa : 0);
     const guestCode = generateGuestCode();
     try {
+      const salt = bcrypt.genSaltSync(10);
+      const hash = bcrypt.hashSync(password || '123456', salt);
       const result = db.prepare(
         "INSERT INTO usuarios (nome, email, whatsapp, instagram, senha_hash, role, valor_total, codigo_convidado) VALUES (?, ?, ?, ?, ?, 'guest', ?, ?)"
-      ).run(nome, email, whatsapp, instagram, password || '123456', finalValue, guestCode);
+      ).run(nome, email, whatsapp, instagram, hash, finalValue, guestCode);
       const guest = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(result.lastInsertRowid) as any;
       const admin = db.prepare("SELECT nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
       addLog(admin?.id || null, admin?.nome || 'Adm', 'Criação de Convidado', `Adm ${admin?.nome} cadastrou o convidado ${nome} com valor de R$ ${finalValue}.`);
