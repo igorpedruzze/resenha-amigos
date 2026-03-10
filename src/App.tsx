@@ -423,6 +423,12 @@ export default function App() {
       const data = await res.json();
       if (res.ok) {
         showToast(data.message || (action === 'confirm' ? 'Presença confirmada!' : 'Desistência registrada.'), 'success');
+        
+        // Update local state immediately for better UX
+        if (user && data.status) {
+          setUser({ ...user, rsvp_status: data.status });
+        }
+        
         fetchMe();
         fetchPublicEvent();
         if (action === 'decline') fetchCompanions(); // Refresh companions list after auto-removal
@@ -1734,27 +1740,42 @@ export default function App() {
                       <p className="font-black uppercase tracking-widest text-sm">O prazo para confirmação expirou</p>
                     </div>
                   ) : (
-                    <div className="flex flex-col md:flex-row gap-4">
-                      {user.rsvp_status !== 'confirmado' && (
-                        <button 
-                          onClick={() => handleRSVP('confirm')}
-                          disabled={loading}
-                          className="flex-1 bg-white text-blue-600 hover:bg-blue-50 font-black py-4 rounded-2xl transition-all shadow-lg shadow-black/10 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
-                        >
-                          {loading ? 'Processando...' : (isSoldOut ? 'Entrar na Lista de Espera' : (user.rsvp_status === 'desistente' ? 'Mudei de ideia, vou sim!' : 'Confirmar Presença'))}
-                          <Check className="size-5" />
-                        </button>
-                      )}
-                      {user.rsvp_status !== 'desistente' && (
-                        <button 
-                          onClick={() => handleRSVP('decline')}
-                          disabled={loading}
-                          className="flex-1 bg-blue-700/50 hover:bg-blue-700 text-white font-black py-4 rounded-2xl transition-all border border-white/20 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
-                        >
-                          {user.rsvp_status === 'confirmado' ? 'Não poderei ir mais' : 'Desistir da Vaga'}
-                          <X className="size-5" />
-                        </button>
-                      )}
+                    <div className="space-y-4">
+                      <div className="flex flex-col md:flex-row gap-4">
+                        {user.rsvp_status === 'confirmado' ? (
+                          <div className="flex-1 bg-emerald-500 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2 uppercase tracking-widest text-xs shadow-lg shadow-emerald-500/20">
+                            <CheckCircle className="size-5" /> Presença Confirmada
+                          </div>
+                        ) : (
+                          <button 
+                            onClick={() => handleRSVP('confirm')}
+                            disabled={loading}
+                            className="flex-1 bg-white text-blue-600 hover:bg-blue-50 font-black py-4 rounded-2xl transition-all shadow-lg shadow-black/10 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
+                          >
+                            {loading ? 'Processando...' : (isSoldOut ? 'Entrar na Lista de Espera' : (user.rsvp_status === 'desistente' ? 'Mudei de ideia, vou sim!' : 'Confirmar Presença'))}
+                            <Check className="size-5" />
+                          </button>
+                        )}
+                        
+                        {user.rsvp_status !== 'desistente' && (
+                          <button 
+                            onClick={() => handleRSVP('decline')}
+                            disabled={loading}
+                            className="flex-1 bg-blue-700/50 hover:bg-blue-700 text-white font-black py-4 rounded-2xl transition-all border border-white/20 flex items-center justify-center gap-2 uppercase tracking-widest text-xs"
+                          >
+                            {user.rsvp_status === 'confirmado' ? 'Não poderei ir mais' : 'Desistir da Vaga'}
+                            <X className="size-5" />
+                          </button>
+                        )}
+                      </div>
+                      
+                      {/* Dynamic status message below buttons */}
+                      <p className="text-[10px] md:text-xs font-bold text-white/70 italic text-center md:text-left">
+                        {user.rsvp_status === 'confirmado' && "Sua vaga está garantida! Agora você pode adicionar seus acompanhantes."}
+                        {user.rsvp_status === 'desistente' && "Você informou que não poderá comparecer. Caso mude de ideia, ainda pode confirmar sua presença se houver vagas."}
+                        {user.rsvp_status === 'lista_espera' && "Você está na lista de espera. Avisaremos assim que uma vaga for liberada!"}
+                        {!user.rsvp_status && "Confirme sua presença para garantir sua vaga no evento."}
+                      </p>
                     </div>
                   )}
                 </div>
