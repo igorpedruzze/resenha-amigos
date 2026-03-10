@@ -11,18 +11,40 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Ensure database directory exists
-const dbDir = process.env.DB_PATH || path.join(__dirname, "database");
+const dbDir = process.env.DB_PATH || path.join(__dirname, "data");
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 
-// Move existing database and settings files to the database folder if they exist in the root
+// Migration: Move files from old 'database' folder to new 'data' folder if 'database' exists
+const legacyDbDir = path.join(__dirname, "database");
+if (fs.existsSync(legacyDbDir) && legacyDbDir !== dbDir) {
+  try {
+    const files = fs.readdirSync(legacyDbDir);
+    for (const file of files) {
+      const oldPath = path.join(legacyDbDir, file);
+      const newPath = path.join(dbDir, file);
+      if (!fs.existsSync(newPath)) {
+        fs.renameSync(oldPath, newPath);
+        console.log(`Moved ${file} from database/ to data/ folder.`);
+      }
+    }
+    // Optionally remove the old directory if empty
+    if (fs.readdirSync(legacyDbDir).length === 0) {
+      fs.rmdirSync(legacyDbDir);
+    }
+  } catch (e) {
+    console.error("Error migrating from database/ to data/:", e);
+  }
+}
+
+// Move existing database and settings files to the data folder if they exist in the root
 const oldDbPath = path.join(__dirname, "eventpro.db");
 const newDbPath = path.join(dbDir, "eventpro.db");
 if (fs.existsSync(oldDbPath) && !fs.existsSync(newDbPath)) {
   try {
     fs.renameSync(oldDbPath, newDbPath);
-    console.log("Moved eventpro.db to database/ folder.");
+    console.log("Moved eventpro.db to data/ folder.");
   } catch (e) {
     console.error("Error moving eventpro.db:", e);
   }
@@ -33,7 +55,7 @@ const newSettingsPath = path.join(dbDir, "settings.json");
 if (fs.existsSync(oldSettingsPath) && !fs.existsSync(newSettingsPath)) {
   try {
     fs.renameSync(oldSettingsPath, newSettingsPath);
-    console.log("Moved settings.json to database/ folder.");
+    console.log("Moved settings.json to data/ folder.");
   } catch (e) {
     console.error("Error moving settings.json:", e);
   }
@@ -82,7 +104,7 @@ const emailTemplate = (content: string, event: any) => `
 
 async function startServer() {
   console.log("Initializing database...");
-  const dbDir = process.env.DB_PATH || path.join(__dirname, "database");
+  const dbDir = process.env.DB_PATH || path.join(__dirname, "data");
   const dbPath = path.join(dbDir, "eventpro.db");
   const db = new Database(dbPath);
   const SETTINGS_FILE = path.join(dbDir, "settings.json");

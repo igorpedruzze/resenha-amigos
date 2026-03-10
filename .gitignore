@@ -6,7 +6,5 @@ coverage/
 *.log
 .env*
 ! .env.example
-database/
 server.js
 eventpro.db
-settings.json
