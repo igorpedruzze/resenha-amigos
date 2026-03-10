@@ -160,6 +160,20 @@ interface Template {
 }
 
 // Components
+const formatPhone = (value: string) => {
+  if (!value) return "";
+  const digits = value.replace(/\D/g, "");
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7, 11)}`;
+};
+
+const validatePhone = (phone: string) => {
+  const digits = phone.replace(/\D/g, "");
+  return digits.length >= 10 && digits.length <= 11;
+};
+
 const Input = ({ label, icon: Icon, id, ...props }: any) => (
   <div className="flex flex-col gap-1.5">
     <label htmlFor={id} className="text-sm font-bold text-slate-700 ml-1">{label}</label>
@@ -794,6 +808,12 @@ export default function App() {
       return;
     }
 
+    if (!validatePhone(signupData.whatsapp)) {
+      setAuthError("Por favor, informe um número de WhatsApp válido com DDD (ex: 11 99999-9999).");
+      setLoading(false);
+      return;
+    }
+
     try {
       const res = await fetch('/api/auth/signup', {
         method: 'POST',
@@ -1058,6 +1078,12 @@ export default function App() {
 
   const handleSaveGuest = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!validatePhone(guestFormData.whatsapp)) {
+      showToast("Por favor, informe um número de WhatsApp válido com DDD.", "error");
+      return;
+    }
+
     const url = editingGuest ? `/api/admin/guests/${editingGuest.id}` : '/api/admin/guests';
     const method = editingGuest ? 'PUT' : 'POST';
     
@@ -1206,6 +1232,12 @@ export default function App() {
 
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!validatePhone(configForm.organizador.whatsapp)) {
+      showToast("Por favor, informe um número de WhatsApp válido para o organizador.", "error");
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch('/api/admin/config', {
@@ -1529,7 +1561,7 @@ export default function App() {
                       autoComplete="tel"
                       placeholder="(00) 00000-0000"
                       value={signupData.whatsapp}
-                      onChange={(e: any) => setSignupData({...signupData, whatsapp: e.target.value})}
+                      onChange={(e: any) => setSignupData({...signupData, whatsapp: formatPhone(e.target.value)})}
                       required
                     />
                     <Input 
@@ -3171,7 +3203,7 @@ export default function App() {
                         value={configForm.organizador.whatsapp}
                         onChange={(e: any) => setConfigForm({
                           ...configForm, 
-                          organizador: { ...configForm.organizador, whatsapp: e.target.value }
+                          organizador: { ...configForm.organizador, whatsapp: formatPhone(e.target.value) }
                         })}
                       />
                     </div>
@@ -3749,7 +3781,7 @@ export default function App() {
                       icon={Phone} 
                       placeholder="(11) 99999-9999"
                       value={guestFormData.whatsapp}
-                      onChange={(e: any) => setGuestFormData({...guestFormData, whatsapp: e.target.value})}
+                      onChange={(e: any) => setGuestFormData({...guestFormData, whatsapp: formatPhone(e.target.value)})}
                       required
                     />
                     <Input 

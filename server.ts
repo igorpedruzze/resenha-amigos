@@ -640,6 +640,12 @@ async function startServer() {
     return str.trim().replace(/[<>]/g, ''); // Basic XSS prevention, prepared statements handle SQLi
   };
 
+  const validatePhone = (phone: string) => {
+    if (!phone) return false;
+    const digits = phone.replace(/\D/g, "");
+    return digits.length >= 10 && digits.length <= 11;
+  };
+
   const app = express();
   app.use(express.json({ limit: '15mb' }));
   app.use(express.urlencoded({ limit: '15mb', extended: true }));
@@ -770,6 +776,10 @@ async function startServer() {
 
     if (!name || !email || !whatsapp || !password) {
       return res.status(400).json({ error: "Nome, E-mail, WhatsApp e Senha são obrigatórios." });
+    }
+
+    if (!validatePhone(whatsapp)) {
+      return res.status(400).json({ error: "Por favor, informe um número de WhatsApp válido com DDD (ex: 11 99999-9999)." });
     }
 
     // Validate companions count
@@ -1391,6 +1401,10 @@ async function startServer() {
     whatsapp = sanitize(whatsapp);
     instagram = sanitize(instagram);
 
+    if (!validatePhone(whatsapp)) {
+      return res.status(400).json({ error: "Por favor, informe um número de WhatsApp válido com DDD." });
+    }
+
     const event = getActiveEvent();
     const count = parseInt(acompanhantes_count) || 0;
     const perPerson = event ? event.valor_por_pessoa : 0;
@@ -1414,6 +1428,11 @@ async function startServer() {
   app.put("/api/admin/guests/:id", (req, res) => {
     const { nome, email, whatsapp, instagram, valor_total, acompanhantes_count, rsvp_status } = req.body;
     const { id } = req.params;
+
+    if (!validatePhone(whatsapp)) {
+      return res.status(400).json({ error: "Por favor, informe um número de WhatsApp válido com DDD." });
+    }
+
     try {
       const oldGuest = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(id) as any;
       db.prepare(
@@ -1755,6 +1774,11 @@ async function startServer() {
 
   app.post("/api/admin/config", (req, res) => {
     const { event, organizador } = req.body;
+
+    if (!validatePhone(organizador.whatsapp)) {
+      return res.status(400).json({ error: "Por favor, informe um número de WhatsApp válido para o organizador." });
+    }
+
     console.log("Receiving config update:", { event, organizador });
     const activeEvent = getActiveEvent();
     const admin = db.prepare("SELECT id FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
