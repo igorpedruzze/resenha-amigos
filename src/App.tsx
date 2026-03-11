@@ -47,6 +47,7 @@ import {
   Key,
   Info,
   Send,
+  Shield,
   Camera,
   AlertCircle,
   Copy,
@@ -65,6 +66,7 @@ interface UserData {
   whatsapp: string;
   instagram: string;
   role: 'admin' | 'guest';
+  is_master?: number;
   valor_total?: number;
   codigo_convidado?: string;
   status?: 'ativo' | 'pendente' | 'recusado';
@@ -105,6 +107,8 @@ interface EventConfig {
   flyer_info?: string;
   limite_acompanhantes?: number;
   prazo_rsvp?: string;
+  admin2_email?: string;
+  admin3_email?: string;
 }
 
 interface OrganizerConfig {
@@ -658,7 +662,9 @@ export default function App() {
       info_texto: '',
       flyer_info: '',
       limite_acompanhantes: 4,
-      prazo_rsvp: ''
+      prazo_rsvp: '',
+      admin2_email: '',
+      admin3_email: ''
     },
     organizador: { nome: '', email: '', whatsapp: '' }
   });
@@ -2860,13 +2866,15 @@ export default function App() {
               <DollarSign className="size-5" />
               <span>Custos do Evento</span>
             </button>
-            <button 
-              onClick={() => { setAdminTab('settings'); setIsSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${adminTab === 'settings' ? 'bg-white/10 text-white font-medium' : 'text-white/70 hover:bg-white/5 hover:text-white'}`}
-            >
-              <Settings className="size-5" />
-              <span>Configurações</span>
-            </button>
+            {user.is_master === 1 && (
+              <button 
+                onClick={() => { setAdminTab('settings'); setIsSidebarOpen(false); }}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${adminTab === 'settings' ? 'bg-white/10 text-white font-medium' : 'text-white/70 hover:bg-white/5 hover:text-white'}`}
+              >
+                <Settings className="size-5" />
+                <span>Configurações</span>
+              </button>
+            )}
           </nav>
           <div className="p-6">
             <div className="bg-white/10 rounded-xl p-4 border border-white/5">
@@ -4041,7 +4049,7 @@ export default function App() {
               />
             )}
 
-            {adminTab === 'settings' && config && (
+            {adminTab === 'settings' && config && user.is_master === 1 && (
               <div className="max-w-4xl space-y-8">
                 <div>
                   <h3 className="text-2xl font-black text-slate-900">Configurações do Sistema</h3>
@@ -4082,6 +4090,45 @@ export default function App() {
                         onChange={(e: any) => setConfigForm({
                           ...configForm, 
                           organizador: { ...configForm.organizador, whatsapp: formatPhone(e.target.value) }
+                        })}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Seção Administradores Adicionais */}
+                  <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 space-y-6">
+                    <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+                      <Shield className="text-blue-600 size-6" />
+                      <h4 className="font-bold text-slate-900">Administradores Adicionais</h4>
+                    </div>
+                    <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl flex items-start gap-3 mb-4">
+                      <Info className="size-5 text-blue-600 mt-0.5" />
+                      <p className="text-xs text-blue-800 leading-relaxed">
+                        Adicione até dois administradores extras. Eles terão acesso total ao painel, 
+                        <strong> exceto</strong> a este menu de Configurações.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <Input 
+                        label="E-mail do 2º Administrador" 
+                        icon={Mail} 
+                        type="email"
+                        placeholder="email@exemplo.com"
+                        value={configForm.event.admin2_email || ''}
+                        onChange={(e: any) => setConfigForm({
+                          ...configForm, 
+                          event: { ...configForm.event, admin2_email: e.target.value }
+                        })}
+                      />
+                      <Input 
+                        label="E-mail do 3º Administrador" 
+                        icon={Mail} 
+                        type="email"
+                        placeholder="email@exemplo.com"
+                        value={configForm.event.admin3_email || ''}
+                        onChange={(e: any) => setConfigForm({
+                          ...configForm, 
+                          event: { ...configForm.event, admin3_email: e.target.value }
                         })}
                       />
                     </div>

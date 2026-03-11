@@ -125,7 +125,7 @@ async function startServer() {
   function saveSettingsBackup() {
     try {
       const event = db.prepare("SELECT * FROM eventos LIMIT 1").get() as any;
-      const admin = db.prepare("SELECT nome, email, whatsapp, senha_hash FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
+      const admin = db.prepare("SELECT nome, email, whatsapp, senha_hash FROM usuarios WHERE is_master = 1 LIMIT 1").get() as any;
       const templates = db.prepare("SELECT * FROM templates").all() as any[];
       
       if (event && admin) {
@@ -201,6 +201,8 @@ async function startServer() {
       flyer_info TEXT,
       limite_acompanhantes INTEGER DEFAULT 4,
       prazo_rsvp TEXT,
+      admin2_email TEXT,
+      admin3_email TEXT,
       tpl_welcome TEXT,
       tpl_approval_guest TEXT,
       tpl_approval_companion TEXT,
@@ -221,12 +223,31 @@ async function startServer() {
       codigo_convidado TEXT UNIQUE,
       acompanhantes_count INTEGER DEFAULT 0,
       status TEXT DEFAULT 'ativo', -- 'ativo', 'pendente', 'recusado'
-      rsvp_status TEXT -- 'confirmado', 'desistente', 'lista_espera'
+      rsvp_status TEXT, -- 'confirmado', 'desistente', 'lista_espera'
+      is_master INTEGER DEFAULT 0
     );
 
     -- Migration: Ensure role column exists if table was created without it
     PRAGMA table_info(usuarios);
   `);
+
+  try {
+    db.exec("ALTER TABLE usuarios ADD COLUMN is_master INTEGER DEFAULT 0");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE eventos ADD COLUMN admin2_email TEXT");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE eventos ADD COLUMN admin3_email TEXT");
+  } catch (e) {}
+
+  try {
+    // Ensure the first admin is master
+    const hasMaster = db.prepare("SELECT COUNT(*) as count FROM usuarios WHERE is_master = 1").get() as any;
+    if (hasMaster.count === 0) {
+      db.prepare("UPDATE usuarios SET is_master = 1 WHERE role = 'admin' AND id = (SELECT MIN(id) FROM usuarios WHERE role = 'admin')").run();
+    }
+  } catch (e) {}
 
   try {
     db.exec("ALTER TABLE usuarios ADD COLUMN acompanhantes_count INTEGER DEFAULT 0");
@@ -774,7 +795,7 @@ async function startServer() {
     const event = getActiveEvent();
     if (!event) return res.status(404).json({ error: "Evento não encontrado" });
     
-    const admin = db.prepare("SELECT foto_perfil, whatsapp FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
+    const admin = db.prepare("SELECT foto_perfil, whatsapp FROM usuarios WHERE is_master = 1 LIMIT 1").get() as any;
     
     res.json({
       nome: event.nome,
@@ -880,7 +901,7 @@ async function startServer() {
         });
 
         // Notify Admin
-        const admin = db.prepare("SELECT email FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
+        const admin = db.prepare("SELECT email FROM usuarios WHERE is_master = 1 LIMIT 1").get() as any;
         if (admin && admin.email) {
           const adminContent = `
             <p>Olá Administrador,</p>
@@ -1444,7 +1465,7 @@ async function startServer() {
         "INSERT INTO usuarios (nome, email, whatsapp, instagram, senha_hash, role, valor_total, codigo_convidado, acompanhantes_count, rsvp_status) VALUES (?, ?, ?, ?, ?, 'guest', ?, ?, ?, ?)"
       ).run(nome, email, whatsapp, instagram, hash, finalValue, guestCode, count, rsvp_status || null);
       const guest = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(result.lastInsertRowid) as any;
-      const admin = db.prepare("SELECT nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
+      const admin = db.prepare("SELECT nome FROM usuarios WHERE is_master = 1 LIMIT 1").get() as any;
       addLog(admin?.id || null, admin?.nome || 'Adm', 'Criação de Convidado', `Adm ${admin?.nome} cadastrou o convidado ${nome} com valor de R$ ${finalValue}.`);
       res.json(guest);
     } catch (error: any) {
@@ -1890,7 +1911,7 @@ async function startServer() {
 
   app.get("/api/admin/config", (req, res) => {
     const event = getActiveEvent();
-    const admin = db.prepare("SELECT id, nome, email, whatsapp FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
+    const admin = db.prepare("SELECT id, nome, email, whatsapp FROM usuarios WHERE is_master = 1 LIMIT 1").get() as any;
     
     if (!event || !admin) return res.status(404).json({ error: "Configurações não encontradas" });
     
@@ -1916,7 +1937,9 @@ async function startServer() {
         info_texto: event.info_texto || "",
         flyer_info: event.flyer_info || "",
         limite_acompanhantes: event.limite_acompanhantes || 4,
-        prazo_rsvp: event.prazo_rsvp || ""
+        prazo_rsvp: event.prazo_rsvp || "",
+        admin2_email: event.admin2_email || "",
+        admin3_email: event.admin3_email || ""
       },
       organizador: {
         nome: admin.nome,
@@ -1935,7 +1958,7 @@ async function startServer() {
 
     console.log("Receiving config update:", { event, organizador });
     const activeEvent = getActiveEvent();
-    const admin = db.prepare("SELECT id FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
+    const admin = db.prepare("SELECT id FROM usuarios WHERE is_master = 1 LIMIT 1").get() as any;
 
     const flyerLanding = saveBase64Image(event.flyer_landing, 'flyer_landing');
     const flyerLandingMobile = saveBase64Image(event.flyer_landing_mobile, 'flyer_landing_mobile');
@@ -1966,7 +1989,9 @@ async function startServer() {
             from_email = ?,
             system_url = ?,
             limite_acompanhantes = ?,
-            prazo_rsvp = ?
+            prazo_rsvp = ?,
+            admin2_email = ?,
+            admin3_email = ?
           WHERE id = ?
         `).run(
           event.nome, 
@@ -1990,8 +2015,21 @@ async function startServer() {
           event.system_url,
           event.limite_acompanhantes || 4,
           event.prazo_rsvp,
+          event.admin2_email,
+          event.admin3_email,
           activeEvent.id
         );
+
+        // Update roles for secondary admins
+        const adminEmails = [event.admin2_email, event.admin3_email].filter(Boolean);
+        
+        // Reset old secondary admins to guest (if they are not master)
+        db.prepare("UPDATE usuarios SET role = 'guest' WHERE role = 'admin' AND is_master = 0").run();
+        
+        // Set new secondary admins
+        for (const email of adminEmails) {
+          db.prepare("UPDATE usuarios SET role = 'admin' WHERE LOWER(email) = LOWER(?) AND is_master = 0").run(email);
+        }
 
         db.prepare(`
           UPDATE usuarios SET 
@@ -2085,7 +2123,7 @@ async function startServer() {
 
   app.post("/api/admin/change-password", (req, res) => {
     const { currentPassword, newPassword } = req.body;
-    const admin = db.prepare("SELECT id, senha_hash FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
+    const admin = db.prepare("SELECT id, senha_hash FROM usuarios WHERE is_master = 1 LIMIT 1").get() as any;
 
     if (admin.senha_hash !== currentPassword) {
       return res.status(401).json({ error: "Senha atual incorreta" });
