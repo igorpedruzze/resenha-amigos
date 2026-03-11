@@ -1865,7 +1865,8 @@ async function startServer() {
         system_url: event.system_url || "",
         info_texto: event.info_texto || "",
         flyer_info: event.flyer_info || "",
-        limite_acompanhantes: event.limite_acompanhantes || 4
+        limite_acompanhantes: event.limite_acompanhantes || 4,
+        prazo_rsvp: event.prazo_rsvp || ""
       },
       organizador: {
         nome: admin.nome,

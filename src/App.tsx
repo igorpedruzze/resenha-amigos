@@ -648,7 +648,8 @@ export default function App() {
       system_url: '',
       info_texto: '',
       flyer_info: '',
-      limite_acompanhantes: 4
+      limite_acompanhantes: 4,
+      prazo_rsvp: ''
     },
     organizador: { nome: '', email: '', whatsapp: '' }
   });
@@ -3851,6 +3852,8 @@ export default function App() {
                             onChange={(e: any) => setConfigForm({ ...configForm, event: { ...configForm.event, capacidade_maxima: Number(e.target.value) } })}
                             required
                           />
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <Input 
                             label="Limite de Acompanhantes" 
                             icon={Users} 
