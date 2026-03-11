@@ -2536,14 +2536,31 @@ export default function App() {
                   <h3 className={`text-2xl md:text-3xl font-black ${hasDeclined ? 'text-slate-400' : isPaid ? 'text-emerald-600' : 'text-slate-900'}`}>
                     {hasDeclined ? 'Inativo (Desistente)' : isPaid ? 'Tudo certo! Sua presença está confirmada.' : `Garanta sua Vaga: ${formatCurrency(balance.balance)}`}
                   </h3>
-                  <div className="mt-2">
-                    <p className="text-xs text-slate-500">{formatCurrency(balance.totalPaid)} de {formatCurrency(balance.totalDue)} pagos</p>
-                    <div className="w-48 bg-slate-100 h-1.5 rounded-full mt-1 overflow-hidden">
+                  <div className="mt-4 w-full">
+                    <div className="flex justify-between items-end mb-1.5">
+                      <p className="text-xs font-black text-slate-600 uppercase tracking-tight">
+                        {formatCurrency(balance.totalPaid)} <span className="text-slate-400 font-bold">pagos</span>
+                      </p>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        Total: {formatCurrency(balance.totalDue)}
+                      </p>
+                    </div>
+                    <div className="w-full max-w-[320px] bg-slate-100 h-4 rounded-full overflow-hidden shadow-inner border border-slate-200/60 relative">
                       <motion.div 
                         initial={{ width: 0 }}
                         animate={{ width: `${progress}%` }}
-                        className={`h-full ${hasDeclined ? 'bg-slate-300' : isPaid ? 'bg-emerald-500' : 'bg-amber-400'} rounded-full`}
-                      />
+                        transition={{ duration: 1.2, ease: "easeOut" }}
+                        className={`h-full rounded-full relative ${
+                          hasDeclined 
+                            ? 'bg-slate-300' 
+                            : isPaid 
+                              ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 shadow-[0_0_15px_rgba(16,185,129,0.3)]' 
+                              : 'bg-gradient-to-r from-amber-400 to-orange-500 shadow-[0_0_15px_rgba(245,158,11,0.3)]'
+                        }`}
+                      >
+                        {/* Brilho sutil */}
+                        <div className="absolute inset-0 bg-gradient-to-b from-white/20 to-transparent" />
+                      </motion.div>
                     </div>
                     {isPaid && !hasDeclined && (
                       <p className="text-[10px] md:text-xs text-emerald-600 font-bold mt-2 flex items-center gap-1">
@@ -2566,9 +2583,11 @@ export default function App() {
                   </div>
                 </div>
               </div>
-              <div className="text-right hidden md:block">
-                <span className={`${hasDeclined ? 'text-slate-400' : isPaid ? 'text-emerald-500' : 'text-amber-500'} font-black text-4xl`}>{Math.round(progress)}%</span>
-                <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tighter">Pago</p>
+              <div className="text-right flex flex-col items-end shrink-0">
+                <span className={`${hasDeclined ? 'text-slate-400' : isPaid ? 'text-emerald-500' : 'text-amber-500'} font-black text-3xl md:text-5xl leading-none`}>
+                  {Math.round(progress)}%
+                </span>
+                <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mt-1">Pago</p>
               </div>
             </div>
 
