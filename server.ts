@@ -2312,11 +2312,21 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/change-password", (req, res) => {
+  app.post("/api/user/change-password", (req, res) => {
     const { currentPassword, newPassword } = req.body;
-    const admin = db.prepare("SELECT id, senha_hash FROM usuarios WHERE is_master = 1 LIMIT 1").get() as any;
+    const userId = (req.session as any).userId;
 
-    if (admin.senha_hash !== currentPassword) {
+    if (!userId) {
+      return res.status(401).json({ error: "Sessão expirada. Faça login novamente." });
+    }
+
+    const user = db.prepare("SELECT id, senha_hash FROM usuarios WHERE id = ?").get(userId) as any;
+
+    if (!user) {
+      return res.status(404).json({ error: "Usuário não encontrado." });
+    }
+
+    if (!bcrypt.compareSync(currentPassword, user.senha_hash)) {
       return res.status(401).json({ error: "Senha atual incorreta" });
     }
 
@@ -2329,7 +2339,44 @@ async function startServer() {
     }
 
     try {
-      db.prepare("UPDATE usuarios SET senha_hash = ? WHERE id = ?").run(newPassword, admin.id);
+      const hashedNewPassword = bcrypt.hashSync(newPassword, 10);
+      db.prepare("UPDATE usuarios SET senha_hash = ? WHERE id = ?").run(hashedNewPassword, user.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Keep old endpoint for backward compatibility but use the new logic
+  app.post("/api/admin/change-password", (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    const userId = (req.session as any).userId;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Sessão expirada. Faça login novamente." });
+    }
+
+    const user = db.prepare("SELECT id, senha_hash, is_master FROM usuarios WHERE id = ?").get(userId) as any;
+
+    if (!user || user.is_master !== 1) {
+      return res.status(403).json({ error: "Apenas o administrador master pode alterar a senha principal." });
+    }
+
+    if (!bcrypt.compareSync(currentPassword, user.senha_hash)) {
+      return res.status(401).json({ error: "Senha atual incorreta" });
+    }
+
+    // Password complexity validation: min 6 chars, 1 letter
+    const hasLetter = /[a-zA-Z]/.test(newPassword);
+    if (newPassword.length < 6 || !hasLetter) {
+      return res.status(400).json({ 
+        error: "A senha deve ter no mínimo 6 caracteres e conter pelo menos 1 letra." 
+      });
+    }
+
+    try {
+      const hashedNewPassword = bcrypt.hashSync(newPassword, 10);
+      db.prepare("UPDATE usuarios SET senha_hash = ? WHERE id = ?").run(hashedNewPassword, user.id);
       res.json({ success: true });
     } catch (error: any) {
       res.status(400).json({ error: error.message });

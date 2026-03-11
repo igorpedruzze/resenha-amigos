@@ -1931,7 +1931,7 @@ export default function App() {
 
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/change-password', {
+      const res = await fetch('/api/user/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2879,6 +2879,57 @@ export default function App() {
                   <p className="text-center py-8 text-slate-400 italic">Nenhum pagamento realizado ainda.</p>
                 )}
               </div>
+            </div>
+            {/* Seção Segurança */}
+            <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-200 space-y-6">
+              <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+                <Lock className="text-red-600 size-6" />
+                <h4 className="font-bold text-slate-900">Segurança</h4>
+              </div>
+              <form onSubmit={handleChangePassword} className="grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
+                <Input 
+                  id="guest_current_password"
+                  name="guest_current_password"
+                  label="Senha Atual" 
+                  icon={Lock} 
+                  type="password"
+                  autoComplete="current-password"
+                  value={passwordForm.current}
+                  onChange={(e: any) => setPasswordForm({ ...passwordForm, current: e.target.value })}
+                  required
+                />
+                <Input 
+                  id="guest_new_password"
+                  name="guest_new_password"
+                  label="Nova Senha" 
+                  icon={Lock} 
+                  type="password"
+                  autoComplete="new-password"
+                  value={passwordForm.new}
+                  onChange={(e: any) => setPasswordForm({ ...passwordForm, new: e.target.value })}
+                  required
+                />
+                <Input 
+                  id="guest_confirm_password"
+                  name="guest_confirm_password"
+                  label="Confirmar Nova Senha" 
+                  icon={Lock} 
+                  type="password"
+                  autoComplete="new-password"
+                  value={passwordForm.confirm}
+                  onChange={(e: any) => setPasswordForm({ ...passwordForm, confirm: e.target.value })}
+                  required
+                />
+                <div className="md:col-span-3 flex justify-end">
+                  <button 
+                    type="submit"
+                    disabled={loading}
+                    className="bg-slate-900 hover:bg-black text-white font-bold px-8 py-3 rounded-xl transition-all disabled:opacity-50"
+                  >
+                    {loading ? 'Alterando...' : 'Alterar Senha'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
 
