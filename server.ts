@@ -1510,6 +1510,56 @@ async function startServer() {
     }
   });
 
+  // Admin: Refund Payment
+  app.post("/api/admin/guests/:id/refund", (req, res) => {
+    const { id } = req.params;
+    const { amount, reason } = req.body;
+    const event = getActiveEvent();
+
+    if (!event) return res.status(404).json({ error: "Evento não encontrado" });
+
+    try {
+      const guest = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(id) as any;
+      if (!guest) return res.status(404).json({ error: "Convidado não encontrado" });
+
+      // Insert a negative payment record to represent the refund
+      db.prepare("INSERT INTO pagamentos (usuario_id, evento_id, valor, status, observacao) VALUES (?, ?, ?, ?, ?)").run(
+        id,
+        event.id,
+        -Math.abs(amount),
+        'concluido',
+        reason || 'Devolução de Valor (Estorno)'
+      );
+
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
+      addLog(admin?.id || null, admin?.nome || 'Adm', 'Devolução de Valor', `Adm ${admin?.nome} devolveu R$ ${amount} para ${guest.nome}. Motivo: ${reason || 'Não informado'}`);
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Admin: Change RSVP Status
+  app.post("/api/admin/guests/:id/rsvp-status", (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body; // 'confirmado', 'desistente', 'lista_espera'
+
+    try {
+      const guest = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(id) as any;
+      if (!guest) return res.status(404).json({ error: "Convidado não encontrado" });
+
+      db.prepare("UPDATE usuarios SET rsvp_status = ? WHERE id = ?").run(status, id);
+
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
+      addLog(admin?.id || null, admin?.nome || 'Adm', 'Alteração RSVP', `Adm ${admin?.nome} alterou o status de presença de ${guest.nome} para ${status}.`);
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Admin: Manual Payment Entry
   app.post("/api/admin/payments/manual", (req, res) => {
     const { userId, amount, observation } = req.body;

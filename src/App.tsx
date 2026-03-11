@@ -49,7 +49,12 @@ import {
   Send,
   Camera,
   AlertCircle,
-  Copy
+  Copy,
+  RotateCcw,
+  UserCheck,
+  UserX,
+  MoreVertical,
+  Ban
 } from 'lucide-react';
 
 // Types
@@ -679,6 +684,8 @@ export default function App() {
   const [searchFilter, setSearchFilter] = useState<'nome' | 'id' | 'instagram' | 'whatsapp'>('nome');
   const [updateAllValue, setUpdateAllValue] = useState('');
   const [showUpdateAllConfirm, setShowUpdateAllConfirm] = useState(false);
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [refundData, setRefundData] = useState({ userId: 0, userName: '', amount: '', reason: '' });
 
   const hasPendingActions = pendingPayments.length > 0 || 
     guests.some(g => g.status === 'pendente') ||
@@ -1617,6 +1624,59 @@ export default function App() {
       }
     } catch (err) {
       showToast('Erro de conexão ao salvar', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRefund = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!refundData.amount || Number(refundData.amount) <= 0) {
+      showToast('Informe um valor válido para devolução', 'error');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/admin/guests/${refundData.userId}/refund`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: Number(refundData.amount), reason: refundData.reason })
+      });
+      if (res.ok) {
+        showToast('Valor devolvido com sucesso!');
+        setShowRefundModal(false);
+        setRefundData({ userId: 0, userName: '', amount: '', reason: '' });
+        fetchAdminStats();
+        fetchGuests();
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Erro ao processar devolução', 'error');
+      }
+    } catch (err) {
+      showToast('Erro de conexão ao processar devolução', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateRsvpStatus = async (guestId: number, status: string) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/admin/guests/${guestId}/rsvp-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      });
+      if (res.ok) {
+        showToast(`Status de presença alterado para ${status === 'confirmado' ? 'Confirmado' : status === 'desistente' ? 'Desistente' : 'Lista de Espera'}`);
+        fetchGuests();
+        fetchAdminStats();
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Erro ao alterar status', 'error');
+      }
+    } catch (err) {
+      showToast('Erro de conexão ao alterar status', 'error');
     } finally {
       setLoading(false);
     }
@@ -3260,6 +3320,7 @@ export default function App() {
                           <th className="px-6 py-4 text-xs font-black text-slate-500 uppercase tracking-wider">ID</th>
                           <th className="px-6 py-4 text-xs font-black text-slate-500 uppercase tracking-wider">Nome</th>
                           <th className="px-6 py-4 text-xs font-black text-slate-500 uppercase tracking-wider">Contato</th>
+                          <th className="px-6 py-4 text-xs font-black text-slate-500 uppercase tracking-wider">Status Presença</th>
                           <th className="px-6 py-4 text-xs font-black text-slate-500 uppercase tracking-wider text-right">Valor Convite</th>
                           <th className="px-6 py-4 text-xs font-black text-slate-500 uppercase tracking-wider text-right">Saldo Devedor</th>
                           <th className="px-6 py-4 text-xs font-black text-slate-500 uppercase tracking-wider text-right">Ações</th>
@@ -3364,6 +3425,24 @@ export default function App() {
                                       <Instagram className="size-3 text-pink-500 group-hover:scale-110 transition-transform" />
                                       <span className="text-[10px] font-medium">{g.instagram}</span>
                                     </a>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="flex flex-col gap-1">
+                                  <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest w-fit ${
+                                    g.rsvp_status === 'confirmado' ? 'bg-emerald-100 text-emerald-700' :
+                                    g.rsvp_status === 'desistente' ? 'bg-red-100 text-red-700' :
+                                    g.rsvp_status === 'lista_espera' ? 'bg-amber-100 text-amber-700' :
+                                    'bg-slate-100 text-slate-700'
+                                  }`}>
+                                    {g.rsvp_status === 'confirmado' ? 'Confirmado' :
+                                     g.rsvp_status === 'desistente' ? 'Desistente' :
+                                     g.rsvp_status === 'lista_espera' ? 'Lista de Espera' :
+                                     'Não Informado'}
+                                  </span>
+                                  {g.rsvp_status === 'confirmado' && (guestStats?.paid || 0) < totalDue && (
+                                    <span className="text-[9px] text-amber-600 font-bold italic">Aguardando Pagamento</span>
                                   )}
                                 </div>
                               </td>
@@ -3487,6 +3566,41 @@ export default function App() {
                                       >
                                         <Edit className="size-4 md:size-5" />
                                       </button>
+                                      
+                                      {/* Novas Ações */}
+                                      {paid > 0 && (
+                                        <button 
+                                          onClick={() => {
+                                            setRefundData({ userId: g.id, userName: g.nome, amount: paid.toString(), reason: '' });
+                                            setShowRefundModal(true);
+                                          }}
+                                          className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                                          title="Devolver Valor (Refund)"
+                                        >
+                                          <RotateCcw className="size-4 md:size-5" />
+                                        </button>
+                                      )}
+                                      
+                                      {g.rsvp_status !== 'confirmado' && (
+                                        <button 
+                                          onClick={() => handleUpdateRsvpStatus(g.id, 'confirmado')}
+                                          className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                                          title="Confirmar Presença"
+                                        >
+                                          <UserCheck className="size-4 md:size-5" />
+                                        </button>
+                                      )}
+                                      
+                                      {g.rsvp_status !== 'desistente' && (
+                                        <button 
+                                          onClick={() => handleUpdateRsvpStatus(g.id, 'desistente')}
+                                          className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                                          title="Marcar como Desistente"
+                                        >
+                                          <UserX className="size-4 md:size-5" />
+                                        </button>
+                                      )}
+
                                       <button 
                                         onClick={() => {
                                           if (deleteConfirmId === g.id) {
@@ -4463,6 +4577,73 @@ export default function App() {
                     >
                       {loading ? <Clock className="size-5 animate-spin" /> : <CheckCircle className="size-5" />}
                       Confirmar Recebimento
+                    </button>
+                  </form>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* Modal de Devolução de Valor */}
+          <AnimatePresence>
+            {showRefundModal && (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setShowRefundModal(false)}
+                  className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+                />
+                <motion.div 
+                  initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                  animate={{ scale: 1, opacity: 1, y: 0 }}
+                  exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                  className="relative w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl overflow-hidden"
+                >
+                  <div className="bg-red-600 p-8 text-white">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="size-12 rounded-2xl bg-white/20 flex items-center justify-center">
+                        <RotateCcw className="size-6" />
+                      </div>
+                      <button onClick={() => setShowRefundModal(false)} className="p-2 hover:bg-white/10 rounded-xl transition-colors">
+                        <X className="size-6" />
+                      </button>
+                    </div>
+                    <h3 className="text-2xl font-black uppercase tracking-tight">Devolver Valor</h3>
+                    <p className="text-red-100 font-medium mt-1">Registrar estorno para {refundData.userName}</p>
+                  </div>
+
+                  <form onSubmit={handleRefund} className="p-8 space-y-6">
+                    <Input 
+                      label="Valor a Devolver (R$)" 
+                      icon={DollarSign} 
+                      type="number" 
+                      step="0.01"
+                      placeholder="0,00"
+                      value={refundData.amount}
+                      onChange={(e: any) => setRefundData({...refundData, amount: e.target.value})}
+                      required
+                    />
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-sm font-bold text-slate-700 ml-1">Motivo da Devolução</label>
+                      <textarea 
+                        className="w-full px-4 py-3.5 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-red-500/20 focus:border-red-500 transition-all outline-none text-slate-900 min-h-[100px]"
+                        placeholder="Ex: Desistência do convidado"
+                        value={refundData.reason}
+                        onChange={(e) => setRefundData({...refundData, reason: e.target.value})}
+                        required
+                      />
+                    </div>
+
+                    <button 
+                      type="submit"
+                      disabled={loading}
+                      className="w-full bg-red-600 hover:bg-red-700 text-white font-black py-4 rounded-xl transition-all shadow-lg shadow-red-600/20 flex items-center justify-center gap-2"
+                    >
+                      {loading ? <Clock className="size-5 animate-spin" /> : <CheckCircle className="size-5" />}
+                      Confirmar Devolução
                     </button>
                   </form>
                 </motion.div>
