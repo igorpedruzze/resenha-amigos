@@ -48,6 +48,9 @@ import {
   Info,
   Send,
   Shield,
+  Wrench,
+  Database,
+  Download,
   Camera,
   AlertCircle,
   Copy,
@@ -587,7 +590,9 @@ const CostsView = ({ costs, sales, onSaveCosts, onSaveSales, onPrint }: { costs:
 export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [view, setView] = useState<'signup' | 'login' | 'dashboard' | 'admin' | 'forgot-password' | 'reset-password'>('signup');
-  const [adminTab, setAdminTab] = useState<'stats' | 'validation' | 'guests' | 'messages_zap' | 'messages_email' | 'bulk_email' | 'costs' | 'settings' | 'logs'>('stats');
+  const [adminTab, setAdminTab] = useState<'stats' | 'validation' | 'guests' | 'messages_zap' | 'messages_email' | 'bulk_email' | 'costs' | 'settings' | 'logs' | 'maintenance'>('stats');
+  const [backups, setBackups] = useState<any[]>([]);
+  const [isGeneratingBackup, setIsGeneratingBackup] = useState(false);
   const [user, setUser] = useState<UserData | null>(null);
   const [balance, setBalance] = useState<BalanceData | null>(null);
   const [adminStats, setAdminStats] = useState<AdminStats | null>(null);
@@ -746,6 +751,123 @@ export default function App() {
       console.error('Error fetching me:', error);
     }
   };
+
+  const fetchBackups = async () => {
+    try {
+      const res = await fetch('/api/admin/backups');
+      if (res.ok) {
+        const data = await res.json();
+        setBackups(data);
+      }
+    } catch (error) {
+      console.error('Error fetching backups:', error);
+    }
+  };
+
+  const handleCreateBackup = async (nome?: string) => {
+    setIsGeneratingBackup(true);
+    try {
+      const res = await fetch('/api/admin/backups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome })
+      });
+      if (res.ok) {
+        showToast('Backup criado com sucesso!');
+        fetchBackups();
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Erro ao criar backup', 'error');
+      }
+    } catch (error) {
+      showToast('Erro de conexão', 'error');
+    } finally {
+      setIsGeneratingBackup(false);
+    }
+  };
+
+  const handleRestoreBackup = async (id: number) => {
+    if (!window.confirm('Tem certeza que deseja restaurar este backup? Todos os dados atuais serão substituídos.')) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/admin/backups/${id}/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (res.ok) {
+        showToast('Sistema restaurado com sucesso!');
+        window.location.reload();
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Erro ao restaurar backup', 'error');
+      }
+    } catch (error) {
+      showToast('Erro de conexão', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteBackup = async (id: number) => {
+    if (!window.confirm('Tem certeza que deseja excluir este backup?')) return;
+    try {
+      const res = await fetch(`/api/admin/backups/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (res.ok) {
+        showToast('Backup excluído!');
+        fetchBackups();
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Erro ao excluir backup', 'error');
+      }
+    } catch (error) {
+      showToast('Erro de conexão', 'error');
+    }
+  };
+
+  const handleDownloadBackup = async (id: number, nome: string) => {
+    window.open(`/api/admin/backups/${id}/download`, '_blank');
+  };
+
+  const handleImportBackup = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const data = JSON.parse(event.target?.result as string);
+        if (!window.confirm('Tem certeza que deseja importar este backup? Todos os dados atuais serão substituídos.')) return;
+        
+        setLoading(true);
+        const res = await fetch('/api/admin/backups/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data })
+        });
+        if (res.ok) {
+          showToast('Backup importado com sucesso!');
+          window.location.reload();
+        } else {
+          const data = await res.json();
+          showToast(data.error || 'Erro ao importar backup', 'error');
+        }
+      } catch (error) {
+        showToast('Arquivo de backup inválido', 'error');
+      } finally {
+        setLoading(false);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  useEffect(() => {
+    if (adminTab === 'maintenance' && user?.is_master === 1) {
+      fetchBackups();
+    }
+  }, [adminTab, user]);
 
   const handleRSVP = async (action: 'confirm' | 'decline') => {
     if (!user) return;
@@ -2871,13 +2993,22 @@ export default function App() {
               <span>Custos do Evento</span>
             </button>
             {user.is_master === 1 && (
-              <button 
-                onClick={() => { setAdminTab('settings'); setIsSidebarOpen(false); }}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${adminTab === 'settings' ? 'bg-white/10 text-white font-medium' : 'text-white/70 hover:bg-white/5 hover:text-white'}`}
-              >
-                <Settings className="size-5" />
-                <span>Configurações</span>
-              </button>
+              <>
+                <button 
+                  onClick={() => { setAdminTab('maintenance'); setIsSidebarOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${adminTab === 'maintenance' ? 'bg-white/10 text-white font-medium' : 'text-white/70 hover:bg-white/5 hover:text-white'}`}
+                >
+                  <Wrench className="size-5" />
+                  <span>Manutenção</span>
+                </button>
+                <button 
+                  onClick={() => { setAdminTab('settings'); setIsSidebarOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${adminTab === 'settings' ? 'bg-white/10 text-white font-medium' : 'text-white/70 hover:bg-white/5 hover:text-white'}`}
+                >
+                  <Settings className="size-5" />
+                  <span>Configurações</span>
+                </button>
+              </>
             )}
           </nav>
           <div className="p-6">
@@ -4051,6 +4182,113 @@ export default function App() {
                 onSaveSales={handleSaveSales}
                 onPrint={handlePrintCosts} 
               />
+            )}
+
+            {adminTab === 'maintenance' && user.is_master === 1 && (
+              <div className="max-w-4xl space-y-8">
+                <div>
+                  <h3 className="text-2xl font-black text-slate-900">Manutenção do Sistema</h3>
+                  <p className="text-slate-500">Gerencie backups e restauração de dados.</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 space-y-6">
+                    <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+                      <Database className="text-blue-600 size-6" />
+                      <h4 className="font-bold text-slate-900">Gerar Backup Interno</h4>
+                    </div>
+                    <p className="text-sm text-slate-500 leading-relaxed">
+                      Cria uma cópia de segurança de todos os dados (eventos, usuários, pagamentos, etc.) no banco de dados interno.
+                    </p>
+                    <button 
+                      onClick={() => handleCreateBackup()}
+                      disabled={isGeneratingBackup}
+                      className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-black uppercase tracking-widest rounded-2xl transition-all shadow-lg shadow-blue-200 flex items-center justify-center gap-3 disabled:opacity-50"
+                    >
+                      {isGeneratingBackup ? <RefreshCw className="size-5 animate-spin" /> : <Plus className="size-5" />}
+                      Gerar Novo Backup
+                    </button>
+                  </div>
+
+                  <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 space-y-6">
+                    <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+                      <Upload className="text-emerald-600 size-6" />
+                      <h4 className="font-bold text-slate-900">Importar Backup Externo</h4>
+                    </div>
+                    <p className="text-sm text-slate-500 leading-relaxed">
+                      Selecione um arquivo JSON de backup previamente baixado para restaurar os dados no sistema.
+                    </p>
+                    <label className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase tracking-widest rounded-2xl transition-all shadow-lg shadow-emerald-200 flex items-center justify-center gap-3 cursor-pointer text-center">
+                      <Upload className="size-5" />
+                      Selecionar Arquivo
+                      <input type="file" className="hidden" accept=".json" onChange={handleImportBackup} />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+                  <div className="p-8 border-b border-slate-100 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <History className="text-slate-400 size-6" />
+                      <h4 className="font-bold text-slate-900">Backups Internos</h4>
+                    </div>
+                    <span className="bg-slate-100 text-slate-600 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                      {backups.length} Registros
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50">
+                          <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Data / Nome</th>
+                          <th className="px-8 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {backups.length === 0 ? (
+                          <tr>
+                            <td colSpan={2} className="px-8 py-12 text-center text-slate-400 italic">Nenhum backup gerado ainda.</td>
+                          </tr>
+                        ) : (
+                          backups.map((b) => (
+                            <tr key={b.id} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="px-8 py-4">
+                                <div className="font-bold text-slate-900 text-sm">{b.nome}</div>
+                                <div className="text-[10px] text-slate-400 font-medium">{new Date(b.data_hora).toLocaleString()}</div>
+                              </td>
+                              <td className="px-8 py-4">
+                                <div className="flex items-center justify-end gap-2">
+                                  <button 
+                                    onClick={() => handleRestoreBackup(b.id)}
+                                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                    title="Restaurar"
+                                  >
+                                    <RefreshCw className="size-4" />
+                                  </button>
+                                  <button 
+                                    onClick={() => handleDownloadBackup(b.id, b.nome)}
+                                    className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                                    title="Download"
+                                  >
+                                    <Download className="size-4" />
+                                  </button>
+                                  <button 
+                                    onClick={() => handleDeleteBackup(b.id)}
+                                    className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                    title="Excluir"
+                                  >
+                                    <Trash2 className="size-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
             )}
 
             {adminTab === 'settings' && config && user.is_master === 1 && (

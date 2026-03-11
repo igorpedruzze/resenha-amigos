@@ -457,6 +457,13 @@ async function startServer() {
       categoria TEXT,
       FOREIGN KEY (evento_id) REFERENCES eventos(id)
     );
+
+    CREATE TABLE IF NOT EXISTS backups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      data_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
+      nome TEXT NOT NULL,
+      conteudo TEXT NOT NULL
+    );
   `);
 
   try {
@@ -1908,6 +1915,116 @@ async function startServer() {
       res.status(500).json({ error: error.message });
     }
   });
+
+  // Maintenance / Backup Routes
+  app.get("/api/admin/backups", (req, res) => {
+    if ((req.session as any).userRole !== 'admin') return res.status(403).json({ error: "Acesso negado" });
+    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ?").get((req.session as any).userId) as any;
+    if (!user || user.is_master !== 1) return res.status(403).json({ error: "Acesso negado" });
+
+    const backups = db.prepare("SELECT id, data_hora, nome FROM backups ORDER BY data_hora DESC").all();
+    res.json(backups);
+  });
+
+  app.post("/api/admin/backups", (req, res) => {
+    if ((req.session as any).userRole !== 'admin') return res.status(403).json({ error: "Acesso negado" });
+    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ?").get((req.session as any).userId) as any;
+    if (!user || user.is_master !== 1) return res.status(403).json({ error: "Acesso negado" });
+
+    const { nome } = req.body;
+    
+    try {
+      const tables = ['eventos', 'usuarios', 'pagamentos', 'acompanhantes', 'templates', 'logs_atividades', 'custos', 'vendas_extras'];
+      const data: any = {};
+      for (const table of tables) {
+        data[table] = db.prepare(`SELECT * FROM ${table}`).all();
+      }
+      
+      const conteudo = JSON.stringify(data);
+      db.prepare("INSERT INTO backups (nome, conteudo) VALUES (?, ?)").run(nome || `Backup ${new Date().toLocaleString()}`, conteudo);
+      
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error creating backup:", error);
+      res.status(500).json({ error: "Erro ao criar backup" });
+    }
+  });
+
+  app.get("/api/admin/backups/:id/download", (req, res) => {
+    if ((req.session as any).userRole !== 'admin') return res.status(403).json({ error: "Acesso negado" });
+    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ?").get((req.session as any).userId) as any;
+    if (!user || user.is_master !== 1) return res.status(403).json({ error: "Acesso negado" });
+
+    const backup = db.prepare("SELECT * FROM backups WHERE id = ?").get(req.params.id) as any;
+    if (!backup) return res.status(404).json({ error: "Backup não encontrado" });
+    
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename=backup_${backup.nome.replace(/\s+/g, '_')}.json`);
+    res.send(backup.conteudo);
+  });
+
+  app.post("/api/admin/backups/:id/restore", (req, res) => {
+    if ((req.session as any).userRole !== 'admin') return res.status(403).json({ error: "Acesso negado" });
+    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ?").get((req.session as any).userId) as any;
+    if (!user || user.is_master !== 1) return res.status(403).json({ error: "Acesso negado" });
+
+    const backup = db.prepare("SELECT * FROM backups WHERE id = ?").get(req.params.id) as any;
+    if (!backup) return res.status(404).json({ error: "Backup não encontrado" });
+    
+    try {
+      const data = JSON.parse(backup.conteudo);
+      restoreData(data);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error restoring backup:", error);
+      res.status(500).json({ error: "Erro ao restaurar backup" });
+    }
+  });
+
+  app.delete("/api/admin/backups/:id", (req, res) => {
+    if ((req.session as any).userRole !== 'admin') return res.status(403).json({ error: "Acesso negado" });
+    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ?").get((req.session as any).userId) as any;
+    if (!user || user.is_master !== 1) return res.status(403).json({ error: "Acesso negado" });
+
+    db.prepare("DELETE FROM backups WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
+  app.post("/api/admin/backups/import", express.json({ limit: '50mb' }), (req, res) => {
+    if ((req.session as any).userRole !== 'admin') return res.status(403).json({ error: "Acesso negado" });
+    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ?").get((req.session as any).userId) as any;
+    if (!user || user.is_master !== 1) return res.status(403).json({ error: "Acesso negado" });
+
+    const { data } = req.body;
+    try {
+      restoreData(data);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error importing backup:", error);
+      res.status(500).json({ error: "Erro ao importar backup" });
+    }
+  });
+
+  function restoreData(data: any) {
+    const tables = ['eventos', 'usuarios', 'pagamentos', 'acompanhantes', 'templates', 'logs_atividades', 'custos', 'vendas_extras'];
+    
+    db.transaction(() => {
+      for (const table of tables) {
+        if (data[table]) {
+          db.prepare(`DELETE FROM ${table}`).run();
+          const rows = data[table];
+          if (rows.length > 0) {
+            const columns = Object.keys(rows[0]);
+            const placeholders = columns.map(() => "?").join(", ");
+            const insert = db.prepare(`INSERT INTO ${table} (${columns.join(", ")}) VALUES (${placeholders})`);
+            for (const row of rows) {
+              insert.run(Object.values(row));
+            }
+          }
+        }
+      }
+    })();
+  }
 
   app.get("/api/admin/config", (req, res) => {
     const event = getActiveEvent();
