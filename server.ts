@@ -2005,6 +2005,60 @@ async function startServer() {
     }
   });
 
+  app.post("/api/admin/maintenance/cleanup", (req, res) => {
+    if ((req.session as any).userRole !== 'admin') return res.status(403).json({ error: "Acesso negado" });
+    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ?").get((req.session as any).userId) as any;
+    if (!user || user.is_master !== 1) return res.status(403).json({ error: "Acesso negado" });
+
+    const { type } = req.body;
+    
+    try {
+      db.transaction(() => {
+        switch (type) {
+          case 'financial':
+            db.prepare("DELETE FROM pagamentos").run();
+            db.prepare("DELETE FROM custos").run();
+            db.prepare("DELETE FROM vendas_extras").run();
+            db.prepare("UPDATE usuarios SET valor_total = 0").run();
+            break;
+          case 'guests_all':
+            db.prepare("DELETE FROM acompanhantes").run();
+            db.prepare("DELETE FROM pagamentos").run();
+            db.prepare("DELETE FROM usuarios WHERE is_master = 0 AND role != 'admin'").run();
+            break;
+          case 'companions_only':
+            db.prepare("DELETE FROM acompanhantes").run();
+            break;
+          case 'unapproved_only':
+            db.prepare("DELETE FROM acompanhantes WHERE status = 'pendente_aprovacao'").run();
+            db.prepare("DELETE FROM usuarios WHERE status IN ('pendente', 'recusado') AND is_master = 0 AND role != 'admin'").run();
+            break;
+          case 'logs':
+            db.prepare("DELETE FROM logs_atividades").run();
+            break;
+          case 'reset_event':
+            db.prepare(`
+              UPDATE eventos SET 
+                data = NULL, 
+                local = NULL, 
+                pix_key = NULL, 
+                capacidade_maxima = 50, 
+                prazo_rsvp = NULL,
+                info_texto = NULL
+            `).run();
+            break;
+          default:
+            throw new Error("Tipo de limpeza inválido");
+        }
+      })();
+      
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error during cleanup:", error);
+      res.status(500).json({ error: "Erro ao realizar limpeza" });
+    }
+  });
+
   function restoreData(data: any) {
     const tables = ['eventos', 'usuarios', 'pagamentos', 'acompanhantes', 'templates', 'logs_atividades', 'custos', 'vendas_extras'];
     

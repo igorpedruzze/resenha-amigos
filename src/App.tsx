@@ -863,6 +863,34 @@ export default function App() {
     reader.readAsText(file);
   };
 
+  const handleCleanup = async (type: string, label: string) => {
+    if (!window.confirm(`ATENÇÃO: Você tem certeza que deseja ${label}? Esta ação não pode ser desfeita.`)) return;
+    
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/maintenance/cleanup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type })
+      });
+      if (res.ok) {
+        showToast('Limpeza realizada com sucesso!');
+        if (type === 'reset_event' || type === 'guests_all') {
+          window.location.reload();
+        } else {
+          fetchAdminStats();
+        }
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Erro ao realizar limpeza', 'error');
+      }
+    } catch (error) {
+      showToast('Erro de conexão', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (adminTab === 'maintenance' && user?.is_master === 1) {
       fetchBackups();
@@ -2506,7 +2534,7 @@ export default function App() {
                 <div>
                   <p className="text-slate-400 text-[10px] md:text-xs font-bold uppercase tracking-widest mb-1">Status Financeiro</p>
                   <h3 className={`text-2xl md:text-3xl font-black ${hasDeclined ? 'text-slate-400' : isPaid ? 'text-emerald-600' : 'text-slate-900'}`}>
-                    {hasDeclined ? 'Inativo (Desistente)' : isPaid ? 'Pagamento Confirmado!' : `Saldo Devedor: ${formatCurrency(balance.balance)}`}
+                    {hasDeclined ? 'Inativo (Desistente)' : isPaid ? 'Tudo certo! Sua presença está confirmada.' : `Garanta sua Vaga: ${formatCurrency(balance.balance)}`}
                   </h3>
                   <div className="mt-2">
                     <p className="text-xs text-slate-500">{formatCurrency(balance.totalPaid)} de {formatCurrency(balance.totalDue)} pagos</p>
@@ -2520,7 +2548,13 @@ export default function App() {
                     {isPaid && !hasDeclined && (
                       <p className="text-[10px] md:text-xs text-emerald-600 font-bold mt-2 flex items-center gap-1">
                         <CheckCircle className="size-3" />
-                        Sua presença na Resenha está confirmada. Nos vemos lá!
+                        Tudo certo! Sua presença está confirmada.
+                      </p>
+                    )}
+                    {!isPaid && !hasDeclined && (
+                      <p className="text-[10px] md:text-xs text-amber-600 font-bold mt-2 flex items-center gap-1">
+                        <AlertCircle className="size-3" />
+                        Falta pouco! Faça o Pix para garantir sua vaga.
                       </p>
                     )}
                     {hasDeclined && (
@@ -2584,7 +2618,7 @@ export default function App() {
                 </div>
                 <div className="bg-white/10 backdrop-blur-sm px-4 py-2 rounded-xl border border-white/20 flex items-center gap-2 group-hover:bg-white/20 transition-colors">
                   <Copy className="size-3 text-blue-100" />
-                  <p className="text-[10px] text-blue-50 font-medium italic">Copie a chave e faça o Pix de qualquer valor para abater seu saldo.</p>
+                  <p className="text-[10px] text-blue-50 font-medium italic">Copie a chave e faça o Pix de qualquer valor para garantir sua vaga.</p>
                 </div>
               </button>
             )}
@@ -2620,7 +2654,7 @@ export default function App() {
                     </button>
                   </div>
                   <p className="text-center text-[10px] text-slate-400 uppercase tracking-widest font-bold">
-                    Faça um Pix de qualquer valor para a chave acima para abater seu saldo.
+                    Faça um Pix de qualquer valor para a chave acima para garantir sua vaga.
                   </p>
                 </div>
               ) : (
@@ -2707,7 +2741,7 @@ export default function App() {
                   <h3 className="text-xl font-black text-slate-900">Meus Acompanhantes</h3>
                   <p className="text-slate-500 text-xs">Adicione pessoas que irão com você (máx {publicEvent?.limite_acompanhantes || 4}).</p>
                   <p className="text-[10px] text-blue-600 font-bold mt-1 leading-tight">
-                    Ao adicionar um acompanhante, o valor de {formatCurrency(publicEvent?.valor || 0)} será somado ao seu saldo devedor após a aprovação do administrador.
+                    Ao adicionar um acompanhante, o valor de {formatCurrency(publicEvent?.valor || 0)} será somado ao valor para garantir sua vaga após a aprovação do administrador.
                   </p>
                 </div>
                 <button 
@@ -2846,7 +2880,7 @@ export default function App() {
                 <form onSubmit={handleAddCompanion} className="p-8 space-y-6">
                   <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 mb-2">
                     <p className="text-xs text-blue-700 font-medium leading-relaxed">
-                      Ao adicionar um acompanhante, o valor de <span className="font-black">{formatCurrency(publicEvent?.valor || 0)}</span> será somado ao seu saldo devedor após a aprovação do administrador. <span className="block mt-1 font-bold">O saldo só aumenta quando o organizador aprova a solicitação.</span>
+                      Ao adicionar um acompanhante, o valor de <span className="font-black">{formatCurrency(publicEvent?.valor || 0)}</span> será somado ao valor para garantir sua vaga após a aprovação do administrador. <span className="block mt-1 font-bold">O valor só aumenta quando o organizador aprova a solicitação.</span>
                     </p>
                   </div>
                   <Input 
@@ -4229,6 +4263,70 @@ export default function App() {
                 <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
                   <div className="p-8 border-b border-slate-100 flex items-center justify-between">
                     <div className="flex items-center gap-3">
+                      <Trash2 className="text-red-600 size-6" />
+                      <h4 className="font-bold text-slate-900">Limpeza de Dados (Novo Evento)</h4>
+                    </div>
+                  </div>
+                  <div className="p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <button 
+                      onClick={() => handleCleanup('financial', 'excluir TODO o financeiro (pagamentos, custos e vendas)')}
+                      className="flex flex-col items-start p-4 rounded-2xl border border-slate-100 hover:border-red-200 hover:bg-red-50 transition-all text-left group"
+                    >
+                      <DollarSign className="size-5 text-red-600 mb-2" />
+                      <span className="font-bold text-slate-900 text-sm">Limpar Financeiro</span>
+                      <span className="text-[10px] text-slate-500">Exclui pagamentos, custos e vendas extras.</span>
+                    </button>
+
+                    <button 
+                      onClick={() => handleCleanup('guests_all', 'excluir TODOS os convidados e acompanhantes')}
+                      className="flex flex-col items-start p-4 rounded-2xl border border-slate-100 hover:border-red-200 hover:bg-red-50 transition-all text-left group"
+                    >
+                      <Users className="size-5 text-red-600 mb-2" />
+                      <span className="font-bold text-slate-900 text-sm">Limpar Convidados</span>
+                      <span className="text-[10px] text-slate-500">Remove todos os convidados e seus acompanhantes.</span>
+                    </button>
+
+                    <button 
+                      onClick={() => handleCleanup('companions_only', 'excluir SOMENTE os acompanhantes')}
+                      className="flex flex-col items-start p-4 rounded-2xl border border-slate-100 hover:border-red-200 hover:bg-red-50 transition-all text-left group"
+                    >
+                      <UserCheck className="size-5 text-red-600 mb-2" />
+                      <span className="font-bold text-slate-900 text-sm">Limpar Acompanhantes</span>
+                      <span className="text-[10px] text-slate-500">Remove apenas os acompanhantes, mantendo os convidados.</span>
+                    </button>
+
+                    <button 
+                      onClick={() => handleCleanup('unapproved_only', 'excluir SOMENTE os convidados e acompanhantes não aprovados')}
+                      className="flex flex-col items-start p-4 rounded-2xl border border-slate-100 hover:border-red-200 hover:bg-red-50 transition-all text-left group"
+                    >
+                      <UserX className="size-5 text-red-600 mb-2" />
+                      <span className="font-bold text-slate-900 text-sm">Limpar Não Aprovados</span>
+                      <span className="text-[10px] text-slate-500">Remove pendentes e recusados (convidados e acomp).</span>
+                    </button>
+
+                    <button 
+                      onClick={() => handleCleanup('logs', 'limpar todos os logs de atividades')}
+                      className="flex flex-col items-start p-4 rounded-2xl border border-slate-100 hover:border-red-200 hover:bg-red-50 transition-all text-left group"
+                    >
+                      <History className="size-5 text-red-600 mb-2" />
+                      <span className="font-bold text-slate-900 text-sm">Limpar Logs</span>
+                      <span className="text-[10px] text-slate-500">Remove todo o histórico de atividades do sistema.</span>
+                    </button>
+
+                    <button 
+                      onClick={() => handleCleanup('reset_event', 'resetar as configurações do evento (data, local, pix)')}
+                      className="flex flex-col items-start p-4 rounded-2xl border border-slate-100 hover:border-red-200 hover:bg-red-50 transition-all text-left group"
+                    >
+                      <RotateCcw className="size-5 text-red-600 mb-2" />
+                      <span className="font-bold text-slate-900 text-sm">Resetar Evento</span>
+                      <span className="text-[10px] text-slate-500">Limpa data, local e chave Pix para um novo evento.</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
+                  <div className="p-8 border-b border-slate-100 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
                       <History className="text-slate-400 size-6" />
                       <h4 className="font-bold text-slate-900">Backups Internos</h4>
                     </div>
@@ -5068,7 +5166,7 @@ export default function App() {
                 <form onSubmit={handleAddCompanion} className="p-8 space-y-6">
                   <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 mb-2">
                     <p className="text-xs text-blue-700 font-medium leading-relaxed">
-                      Ao adicionar um acompanhante, o valor de <span className="font-black">{formatCurrency(config?.event.valor || 0)}</span> será somado ao seu saldo devedor.
+                      Ao adicionar um acompanhante, o valor de <span className="font-black">{formatCurrency(config?.event.valor || 0)}</span> será somado ao valor para garantir sua vaga.
                     </p>
                   </div>
                   <Input 
