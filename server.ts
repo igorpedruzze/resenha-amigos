@@ -669,19 +669,24 @@ async function startServer() {
   };
 
   const app = express();
+  app.set('trust proxy', 1); // Trust first proxy (Railway/Cloud Run)
   app.use(express.json({ limit: '15mb' }));
   app.use(express.urlencoded({ limit: '15mb', extended: true }));
 
   // Session configuration
-  const sessionSecret = process.env.SESSION_SECRET || randomBytes(32).toString('hex');
+  const sessionSecret = process.env.SESSION_SECRET || 'resenha-secret-key-default-123';
   app.use(session({
     secret: sessionSecret,
-    resave: false,
+    resave: true,
     saveUninitialized: false,
+    name: 'resenha_session',
+    proxy: true,
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 24 * 60 * 60 * 1000 // 24 hours
+      secure: true, // Required for SameSite=None
+      sameSite: 'none', // Required for Iframe compatibility
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      path: '/'
     }
   }));
   
@@ -1623,21 +1628,21 @@ async function startServer() {
     if (!event) {
       return res.status(404).json({ error: "Nenhum evento ativo encontrado" });
     }
-    const totalArrecadado = db.prepare("SELECT SUM(valor) as total FROM pagamentos WHERE evento_id = ? AND status = 'concluido'").get(event.id);
-    const totalEsperadoResult = db.prepare("SELECT SUM(COALESCE(valor_total, ?)) as total FROM usuarios WHERE role = 'guest' AND status = 'ativo' AND (rsvp_status IS NULL OR rsvp_status != 'desistente')").get(event.valor_por_pessoa);
-    const totalEsperado = (totalEsperadoResult as any).total || 0;
+    const totalArrecadado = db.prepare("SELECT COALESCE(SUM(valor), 0) as total FROM pagamentos WHERE evento_id = ? AND status = 'concluido'").get(event.id) as any;
+    const totalEsperadoResult = db.prepare("SELECT COALESCE(SUM(COALESCE(valor_total, ?)), 0) as total FROM usuarios WHERE role = 'guest' AND status = 'ativo' AND (rsvp_status IS NULL OR rsvp_status != 'desistente')").get(event.valor_por_pessoa) as any;
+    const totalEsperado = totalEsperadoResult?.total || 0;
 
     // RSVP Confirmed Stats
     const confirmedCount = getCurrentOccupancy();
 
     const totalGuests = db.prepare("SELECT COUNT(*) as count FROM usuarios WHERE role = 'guest'").get() as any;
     const totalCompanions = db.prepare("SELECT COUNT(*) as count FROM acompanhantes").get() as any;
-    const totalRequests = (totalGuests.count || 0) + (totalCompanions.count || 0);
+    const totalRequests = (totalGuests?.count || 0) + (totalCompanions?.count || 0);
 
-    const totalCustos = db.prepare("SELECT SUM(total) as total FROM custos WHERE evento_id = ?").get(event.id) as any;
+    const totalCustos = db.prepare("SELECT COALESCE(SUM(total), 0) as total FROM custos WHERE evento_id = ?").get(event.id) as any;
     const custos = db.prepare("SELECT * FROM custos WHERE evento_id = ?").all(event.id);
 
-    const totalVendasExtras = db.prepare("SELECT SUM(valor) as total FROM vendas_extras WHERE evento_id = ?").get(event.id) as any;
+    const totalVendasExtras = db.prepare("SELECT COALESCE(SUM(valor), 0) as total FROM vendas_extras WHERE evento_id = ?").get(event.id) as any;
     const vendasExtras = db.prepare("SELECT * FROM vendas_extras WHERE evento_id = ?").all(event.id);
 
     const guests = db.prepare(`
@@ -1652,13 +1657,13 @@ async function startServer() {
     `).all(event.id);
 
     res.json({
-      totalArrecadado: (totalArrecadado as any).total || 0,
-      totalVendasExtras: totalVendasExtras.total || 0,
+      totalArrecadado: totalArrecadado?.total || 0,
+      totalVendasExtras: totalVendasExtras?.total || 0,
       vendasExtras,
       totalEsperado,
       confirmedCount,
       totalRequests,
-      totalCustos: totalCustos.total || 0,
+      totalCustos: totalCustos?.total || 0,
       custos,
       capacity: event.capacidade_maxima || 50,
       guests: guests.map((g: any) => {

@@ -1065,11 +1065,18 @@ export default function App() {
   };
 
   const fetchAdminStats = async () => {
-    const res = await fetch('/api/admin/stats');
-    if (res.ok) {
-      const data = await res.json();
-      setAdminStats(data);
-      if (data.pixKey) setAdminPixInput(data.pixKey);
+    try {
+      const res = await fetch('/api/admin/stats');
+      if (res.ok) {
+        const data = await res.json();
+        setAdminStats(data);
+        if (data.pixKey) setAdminPixInput(data.pixKey);
+      } else if (res.status === 401) {
+        setUser(null);
+        setView('login');
+      }
+    } catch (error) {
+      console.error('Error fetching admin stats:', error);
     }
   };
 
@@ -2770,6 +2777,12 @@ export default function App() {
           </header>
 
           <div className="p-8 space-y-8">
+            {adminTab === 'stats' && !adminStats && (
+              <div className="flex flex-col items-center justify-center py-20 space-y-4">
+                <div className="size-12 border-4 border-blue-600/20 border-t-blue-600 rounded-full animate-spin"></div>
+                <p className="text-slate-500 font-medium">Carregando estatísticas...</p>
+              </div>
+            )}
             {adminTab === 'stats' && adminStats && (
               <>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
