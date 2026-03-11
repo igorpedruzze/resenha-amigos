@@ -581,7 +581,7 @@ const CostsView = ({ costs, sales, onSaveCosts, onSaveSales, onPrint }: { costs:
 export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [view, setView] = useState<'signup' | 'login' | 'dashboard' | 'admin' | 'forgot-password' | 'reset-password'>('signup');
-  const [adminTab, setAdminTab] = useState<'stats' | 'validation' | 'guests' | 'messages' | 'costs' | 'settings' | 'logs'>('stats');
+  const [adminTab, setAdminTab] = useState<'stats' | 'validation' | 'guests' | 'messages_zap' | 'messages_email' | 'bulk_email' | 'costs' | 'settings' | 'logs'>('stats');
   const [user, setUser] = useState<UserData | null>(null);
   const [balance, setBalance] = useState<BalanceData | null>(null);
   const [adminStats, setAdminStats] = useState<AdminStats | null>(null);
@@ -635,6 +635,10 @@ export default function App() {
     rsvp_status: ''
   });
   const [logSearchId, setLogSearchId] = useState('');
+  const [bulkEmailMessage, setBulkEmailMessage] = useState('');
+  const [bulkEmailFilter, setBulkEmailFilter] = useState<'all' | 'active' | 'confirmed' | 'not_confirmed' | 'pending_payment'>('all');
+  const [isBulkSending, setIsBulkSending] = useState(false);
+  const [bulkSendProgress, setBulkSendProgress] = useState({ current: 0, total: 0, status: '' });
   const [adminPixInput, setAdminPixInput] = useState('');
   const [configForm, setConfigForm] = useState<ConfigData>({
     event: { 
@@ -1476,6 +1480,75 @@ export default function App() {
       const data = await res.json();
       showToast(data.error || 'Erro ao salvar convidado', 'error');
     }
+  };
+
+  const handleBulkEmailSend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bulkEmailMessage.trim()) {
+      showToast('Digite uma mensagem para enviar', 'error');
+      return;
+    }
+
+    // Filter guests
+    const filteredGuests = guests.filter(g => {
+      if (bulkEmailFilter === 'all') return true;
+      if (bulkEmailFilter === 'active') return g.status === 'ativo';
+      if (bulkEmailFilter === 'confirmed') return g.rsvp_status === 'confirmado';
+      if (bulkEmailFilter === 'not_confirmed') return g.rsvp_status !== 'confirmado';
+      if (bulkEmailFilter === 'pending_payment') {
+        const guestStats = adminStats?.guests.find(as => as.id === g.id);
+        const paid = guestStats?.paid || 0;
+        const totalDue = g.valor_total !== undefined && g.valor_total !== null ? g.valor_total : (adminStats?.eventValue || 500);
+        return paid < totalDue;
+      }
+      return true;
+    });
+
+    if (filteredGuests.length === 0) {
+      showToast('Nenhum convidado encontrado com este filtro', 'error');
+      return;
+    }
+
+    if (!confirm(`Deseja enviar este informativo para ${filteredGuests.length} convidados? O envio será feito com intervalo de 20 segundos entre cada e-mail.`)) {
+      return;
+    }
+
+    setIsBulkSending(true);
+    setBulkSendProgress({ current: 0, total: filteredGuests.length, status: 'Iniciando envio...' });
+
+    for (let i = 0; i < filteredGuests.length; i++) {
+      const guest = filteredGuests[i];
+      setBulkSendProgress({ current: i + 1, total: filteredGuests.length, status: `Enviando para ${guest.nome}...` });
+
+      try {
+        const res = await fetch('/api/admin/send-custom-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: guest.id,
+            email: guest.email,
+            subject: `Informativo: ${config?.event.nome}`,
+            message: bulkEmailMessage
+          })
+        });
+
+        if (!res.ok) {
+          console.error(`Erro ao enviar para ${guest.email}`);
+        }
+      } catch (err) {
+        console.error(`Erro de conexão ao enviar para ${guest.email}`, err);
+      }
+
+      if (i < filteredGuests.length - 1) {
+        setBulkSendProgress(prev => ({ ...prev, status: `Aguardando 20s para o próximo envio...` }));
+        await new Promise(resolve => setTimeout(resolve, 20000));
+      }
+    }
+
+    setIsBulkSending(false);
+    setBulkSendProgress({ current: 0, total: 0, status: '' });
+    showToast('Envio em massa concluído!');
+    setBulkEmailMessage('');
   };
 
   const handleUpdateAllGuestValues = async () => {
@@ -2753,11 +2826,25 @@ export default function App() {
               <span>Convidados</span>
             </button>
             <button 
-              onClick={() => { setAdminTab('messages'); setIsSidebarOpen(false); }}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${adminTab === 'messages' ? 'bg-white/10 text-white font-medium' : 'text-white/70 hover:bg-white/5 hover:text-white'}`}
+              onClick={() => { setAdminTab('messages_zap'); setIsSidebarOpen(false); }}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${adminTab === 'messages_zap' ? 'bg-white/10 text-white font-medium' : 'text-white/70 hover:bg-white/5 hover:text-white'}`}
             >
-              <MessageSquare className="size-5" />
-              <span>Mensagens</span>
+              <MessageCircle className="size-5" />
+              <span>Mensagens Zap</span>
+            </button>
+            <button 
+              onClick={() => { setAdminTab('messages_email'); setIsSidebarOpen(false); }}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${adminTab === 'messages_email' ? 'bg-white/10 text-white font-medium' : 'text-white/70 hover:bg-white/5 hover:text-white'}`}
+            >
+              <Mail className="size-5" />
+              <span>Mensagens E-mails</span>
+            </button>
+            <button 
+              onClick={() => { setAdminTab('bulk_email'); setIsSidebarOpen(false); }}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${adminTab === 'bulk_email' ? 'bg-white/10 text-white font-medium' : 'text-white/70 hover:bg-white/5 hover:text-white'}`}
+            >
+              <Send className="size-5" />
+              <span>Informativo Envio</span>
             </button>
             <button 
               onClick={() => { setAdminTab('logs'); setIsSidebarOpen(false); }}
@@ -3635,10 +3722,10 @@ export default function App() {
               </div>
             )}
 
-            {adminTab === 'messages' && (
+            {adminTab === 'messages_zap' && (
               <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="flex flex-col gap-1">
-                  <h2 className="text-3xl font-black text-slate-900 tracking-tight">Modelos de Mensagens</h2>
+                  <h2 className="text-3xl font-black text-slate-900 tracking-tight">Modelos de Mensagens WhatsApp</h2>
                   <p className="text-slate-500 font-medium">Personalize os textos enviados via WhatsApp para seus convidados.</p>
                 </div>
 
@@ -3651,13 +3738,7 @@ export default function App() {
                       { id: 'wa_welcome', label: 'WhatsApp: Boas-vindas', desc: 'Enviado após o cadastro.' },
                       { id: 'wa_approval_guest', label: 'WhatsApp: Aprovação', desc: 'Enviado quando o convidado é aprovado.' },
                       { id: 'wa_approval_companion', label: 'WhatsApp: Acompanhante', desc: 'Enviado quando um acompanhante é aprovado.' },
-                      { id: 'wa_payment_confirm', label: 'WhatsApp: Pagamento', desc: 'Enviado após confirmação de pagamento.' },
-                      
-                      { id: 'email_welcome', label: 'E-mail: Boas-vindas', desc: 'Enviado após o cadastro.' },
-                      { id: 'email_approval_guest', label: 'E-mail: Aprovação', desc: 'Enviado quando o convidado é aprovado.' },
-                      { id: 'email_approval_companion', label: 'E-mail: Acompanhante', desc: 'Enviado quando um acompanhante é aprovado.' },
-                      { id: 'email_payment_confirm', label: 'E-mail: Pagamento', desc: 'Enviado após confirmação de pagamento.' },
-                      { id: 'email_password_recovery', label: 'E-mail: Recuperação de Senha', desc: 'Enviado ao solicitar nova senha.' }
+                      { id: 'wa_payment_confirm', label: 'WhatsApp: Pagamento', desc: 'Enviado após confirmação de pagamento.' }
                     ].map((t) => (
                       <div key={t.id} className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 space-y-4">
                         <div className="flex flex-col gap-1">
@@ -3707,10 +3788,246 @@ export default function App() {
                       disabled={loading}
                       className="bg-blue-600 hover:bg-blue-700 text-white font-black px-10 py-4 rounded-2xl transition-all shadow-xl shadow-blue-600/20 disabled:opacity-50"
                     >
-                      {loading ? 'Salvando...' : 'Salvar Modelos'}
+                      {loading ? 'Salvando...' : 'Salvar Modelos Zap'}
                     </button>
                   </div>
                 </form>
+              </div>
+            )}
+
+            {adminTab === 'messages_email' && (
+              <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="flex flex-col gap-1">
+                  <h2 className="text-3xl font-black text-slate-900 tracking-tight">Modelos de E-mails</h2>
+                  <p className="text-slate-500 font-medium">Personalize os e-mails enviados automaticamente pelo sistema.</p>
+                </div>
+
+                <form onSubmit={handleSaveTemplates} className="space-y-8">
+                  <div className="grid grid-cols-1 gap-8">
+                    {[
+                      { id: 'email_welcome', label: 'E-mail: Boas-vindas', desc: 'Enviado após o cadastro.' },
+                      { id: 'email_approval_guest', label: 'E-mail: Aprovação', desc: 'Enviado quando o convidado é aprovado.' },
+                      { id: 'email_approval_companion', label: 'E-mail: Acompanhante', desc: 'Enviado quando um acompanhante é aprovado.' },
+                      { id: 'email_payment_confirm', label: 'E-mail: Pagamento', desc: 'Enviado após confirmação de pagamento.' },
+                      { id: 'email_password_recovery', label: 'E-mail: Recuperação de Senha', desc: 'Enviado ao solicitar nova senha.' }
+                    ].map((t) => (
+                      <div key={t.id} className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 space-y-4">
+                        <div className="flex flex-col gap-1">
+                          <h4 className="font-bold text-slate-900">{t.label}</h4>
+                          <p className="text-xs text-slate-500">{t.desc}</p>
+                        </div>
+                        <textarea 
+                          className="w-full px-4 py-3.5 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none text-slate-900 min-h-[120px] font-medium text-sm"
+                          value={templates.find(temp => temp.tipo === t.id)?.conteudo || ''}
+                          onChange={(e) => {
+                            const newTemplates = [...templates];
+                            const index = newTemplates.findIndex(temp => temp.tipo === t.id);
+                            if (index !== -1) {
+                              newTemplates[index].conteudo = e.target.value;
+                              setTemplates(newTemplates);
+                            }
+                          }}
+                          placeholder="Digite o modelo do e-mail..."
+                          required
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          {['{nome}', '{id}', '{codigo_convidado}', '{valor}', '{link}', '{evento}', '{saldo}', '{chave_pix}'].map(tag => (
+                            <button
+                              key={tag}
+                              type="button"
+                              onClick={() => {
+                                const newTemplates = [...templates];
+                                const index = newTemplates.findIndex(temp => temp.tipo === t.id);
+                                if (index !== -1) {
+                                  newTemplates[index].conteudo += tag;
+                                  setTemplates(newTemplates);
+                                }
+                              }}
+                              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-[10px] font-bold transition-colors"
+                            >
+                              {tag}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button 
+                      type="submit"
+                      disabled={loading}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-black px-10 py-4 rounded-2xl transition-all shadow-xl shadow-blue-600/20 disabled:opacity-50"
+                    >
+                      {loading ? 'Salvando...' : 'Salvar Modelos E-mail'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {adminTab === 'bulk_email' && (
+              <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="flex flex-col gap-1">
+                  <h2 className="text-3xl font-black text-slate-900 tracking-tight">Informativo Envio</h2>
+                  <p className="text-slate-500 font-medium">Envie comunicados em massa por e-mail para seus convidados.</p>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  <div className="lg:col-span-2 space-y-6">
+                    <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 space-y-6">
+                      <div className="space-y-3">
+                        <label className="text-sm font-bold text-slate-700 ml-1">Modelos Rápidos</label>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            { label: 'Lembrete RSVP', text: 'Fala, pessoal! Passando para lembrar que o prazo para confirmar sua presença está acabando. É muito importante que você confirme pelo painel para que eu consiga organizar a lista de entrada e as bebidas. Não fica de fora dessa!' },
+                            { label: 'Mudança Local', text: 'Atenção, galera! Tivemos uma pequena atualização no local do evento para garantir mais conforto para todo mundo. O novo endereço já está atualizado no painel. Qualquer dúvida, é só me chamar!' },
+                            { label: 'Pendência Financeira', text: 'Oi! Notei que seu cadastro está aprovado, mas o pagamento ainda não foi identificado no sistema. Para garantir sua vaga e evitar filas na entrada, peço que realize o Pix pela chave disponível no seu painel e anexe o comprovante. Valeu!' },
+                            { label: 'Contagem Regressiva', text: 'Faltam apenas alguns dias para a nossa resenha! Preparem o fígado e a animação porque vai ser histórico. Vejo todos vocês lá!' }
+                          ].map((tmpl, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => setBulkEmailMessage(tmpl.text)}
+                              className="px-3 py-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-600 rounded-lg text-xs font-bold transition-all border border-transparent hover:border-blue-200"
+                            >
+                              {tmpl.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-sm font-bold text-slate-700 ml-1">Mensagem do Informativo</label>
+                        <textarea 
+                          className="w-full px-4 py-3.5 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none text-slate-900 min-h-[300px] font-medium text-sm"
+                          value={bulkEmailMessage}
+                          onChange={(e) => setBulkEmailMessage(e.target.value)}
+                          placeholder="Digite o texto informativo que será enviado por e-mail..."
+                          disabled={isBulkSending}
+                        />
+                        <p className="text-[10px] text-slate-400 mt-1">Dica: Use parágrafos claros. O sistema formatará o texto automaticamente no template do evento.</p>
+                      </div>
+
+                      <div className="flex flex-col md:flex-row gap-4 items-end">
+                        <div className="flex-1 space-y-1.5">
+                          <label className="text-sm font-bold text-slate-700 ml-1">Filtrar Destinatários</label>
+                          <select 
+                            className="w-full px-4 py-3.5 rounded-xl border border-slate-200 bg-slate-50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none text-slate-900 font-bold text-sm"
+                            value={bulkEmailFilter}
+                            onChange={(e) => setBulkEmailFilter(e.target.value as any)}
+                            disabled={isBulkSending}
+                          >
+                            <option value="all">Todos os Cadastrados</option>
+                            <option value="active">Todos com Cadastro Aceito (Ativos)</option>
+                            <option value="confirmed">Somente Confirmados (RSVP)</option>
+                            <option value="not_confirmed">Somente Não Confirmados (RSVP)</option>
+                            <option value="pending_payment">Com Pendência Financeira</option>
+                          </select>
+                        </div>
+
+                        <button 
+                          onClick={handleBulkEmailSend}
+                          disabled={isBulkSending || !bulkEmailMessage.trim()}
+                          className="bg-blue-600 hover:bg-blue-700 text-white font-black px-8 py-4 rounded-2xl transition-all shadow-xl shadow-blue-600/20 disabled:opacity-50 flex items-center gap-2 whitespace-nowrap"
+                        >
+                          {isBulkSending ? (
+                            <>
+                              <Clock className="size-5 animate-spin" />
+                              Enviando...
+                            </>
+                          ) : (
+                            <>
+                              <Send className="size-5" />
+                              Iniciar Envio em Massa
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div className="bg-slate-900 p-8 rounded-3xl text-white space-y-6">
+                      <h4 className="font-black text-lg uppercase tracking-tight flex items-center gap-2">
+                        <Info className="size-5 text-blue-400" />
+                        Status do Envio
+                      </h4>
+                      
+                      {isBulkSending ? (
+                        <div className="space-y-4">
+                          <div className="flex justify-between items-end">
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Progresso</p>
+                            <p className="text-2xl font-black">{Math.round((bulkSendProgress.current / bulkSendProgress.total) * 100)}%</p>
+                          </div>
+                          <div className="w-full h-3 bg-white/10 rounded-full overflow-hidden">
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${(bulkSendProgress.current / bulkSendProgress.total) * 100}%` }}
+                              className="h-full bg-blue-500"
+                            />
+                          </div>
+                          <p className="text-sm font-medium text-blue-200 italic">{bulkSendProgress.status}</p>
+                          <div className="pt-4 border-t border-white/10">
+                            <p className="text-xs text-slate-400">Enviados: <span className="text-white font-bold">{bulkSendProgress.current}</span> / {bulkSendProgress.total}</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <p className="text-sm text-slate-400 leading-relaxed">
+                            O envio em massa respeita um intervalo de <strong>20 segundos</strong> entre cada e-mail para garantir a entrega e evitar filtros de spam.
+                          </p>
+                          <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
+                            <p className="text-xs font-bold text-blue-400 uppercase tracking-widest mb-1">Dica de Segurança</p>
+                            <p className="text-[11px] text-slate-300">Não feche esta aba enquanto o envio estiver em progresso.</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="bg-white p-6 rounded-3xl border border-slate-200">
+                      <h4 className="font-bold text-slate-900 mb-4">Resumo do Filtro</h4>
+                      <div className="space-y-3">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-500">Total de Destinatários:</span>
+                          <span className="font-bold text-slate-900">
+                            {guests.filter(g => {
+                              if (bulkEmailFilter === 'all') return true;
+                              if (bulkEmailFilter === 'active') return g.status === 'ativo';
+                              if (bulkEmailFilter === 'confirmed') return g.rsvp_status === 'confirmado';
+                              if (bulkEmailFilter === 'not_confirmed') return g.rsvp_status !== 'confirmado';
+                              if (bulkEmailFilter === 'pending_payment') {
+                                const guestStats = adminStats?.guests.find(as => as.id === g.id);
+                                const paid = guestStats?.paid || 0;
+                                const totalDue = g.valor_total !== undefined && g.valor_total !== null ? g.valor_total : (adminStats?.eventValue || 500);
+                                return paid < totalDue;
+                              }
+                              return true;
+                            }).length}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-500">Tempo Estimado:</span>
+                          <span className="font-bold text-blue-600">
+                            {Math.ceil((guests.filter(g => {
+                              if (bulkEmailFilter === 'all') return true;
+                              if (bulkEmailFilter === 'active') return g.status === 'ativo';
+                              if (bulkEmailFilter === 'confirmed') return g.rsvp_status === 'confirmado';
+                              if (bulkEmailFilter === 'not_confirmed') return g.rsvp_status !== 'confirmado';
+                              if (bulkEmailFilter === 'pending_payment') {
+                                const guestStats = adminStats?.guests.find(as => as.id === g.id);
+                                const paid = guestStats?.paid || 0;
+                                const totalDue = g.valor_total !== undefined && g.valor_total !== null ? g.valor_total : (adminStats?.eventValue || 500);
+                                return paid < totalDue;
+                              }
+                              return true;
+                            }).length * 20) / 60)} min
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 

@@ -2146,6 +2146,34 @@ async function startServer() {
     }
   });
 
+  app.post("/api/admin/send-custom-email", async (req, res) => {
+    const { userId, email, subject, message } = req.body;
+    const event = getActiveEvent();
+    
+    if (!event) return res.status(404).json({ error: "Evento não encontrado" });
+    if (!email || !message) return res.status(400).json({ error: "E-mail e mensagem são obrigatórios" });
+
+    try {
+      // Format message with line breaks to HTML
+      const formattedMessage = message.replace(/\n/g, '<br>');
+      
+      const success = await sendEmail(email, subject, emailTemplate(formattedMessage, event));
+      
+      if (success) {
+        if (userId) {
+          const user = db.prepare("SELECT nome FROM usuarios WHERE id = ?").get(userId) as any;
+          addLog(userId, user?.nome || 'Usuário', 'Informativo Enviado', `Informativo enviado por e-mail: ${subject}`);
+        }
+        res.json({ success: true });
+      } else {
+        res.status(500).json({ error: "Falha ao enviar e-mail" });
+      }
+    } catch (error: any) {
+      console.error("Send custom email error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get("/api/admin/logs", (req, res) => {
     try {
       const logs = db.prepare("SELECT * FROM logs_atividades ORDER BY data_hora DESC").all();
