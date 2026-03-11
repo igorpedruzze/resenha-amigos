@@ -108,7 +108,9 @@ interface EventConfig {
   limite_acompanhantes?: number;
   prazo_rsvp?: string;
   admin2_email?: string;
+  admin2_password?: string;
   admin3_email?: string;
+  admin3_password?: string;
 }
 
 interface OrganizerConfig {
@@ -664,7 +666,9 @@ export default function App() {
       limite_acompanhantes: 4,
       prazo_rsvp: '',
       admin2_email: '',
-      admin3_email: ''
+      admin2_password: '',
+      admin3_email: '',
+      admin3_password: ''
     },
     organizador: { nome: '', email: '', whatsapp: '' }
   });
@@ -4109,28 +4113,54 @@ export default function App() {
                       </p>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <Input 
-                        label="E-mail do 2º Administrador" 
-                        icon={Mail} 
-                        type="email"
-                        placeholder="email@exemplo.com"
-                        value={configForm.event.admin2_email || ''}
-                        onChange={(e: any) => setConfigForm({
-                          ...configForm, 
-                          event: { ...configForm.event, admin2_email: e.target.value }
-                        })}
-                      />
-                      <Input 
-                        label="E-mail do 3º Administrador" 
-                        icon={Mail} 
-                        type="email"
-                        placeholder="email@exemplo.com"
-                        value={configForm.event.admin3_email || ''}
-                        onChange={(e: any) => setConfigForm({
-                          ...configForm, 
-                          event: { ...configForm.event, admin3_email: e.target.value }
-                        })}
-                      />
+                      <div className="space-y-4">
+                        <Input 
+                          label="E-mail do 2º Administrador" 
+                          icon={Mail} 
+                          type="email"
+                          placeholder="email@exemplo.com"
+                          value={configForm.event.admin2_email || ''}
+                          onChange={(e: any) => setConfigForm({
+                            ...configForm, 
+                            event: { ...configForm.event, admin2_email: e.target.value }
+                          })}
+                        />
+                        <Input 
+                          label="Senha do 2º Administrador" 
+                          icon={Lock} 
+                          type="password"
+                          placeholder="Definir nova senha"
+                          value={configForm.event.admin2_password || ''}
+                          onChange={(e: any) => setConfigForm({
+                            ...configForm, 
+                            event: { ...configForm.event, admin2_password: e.target.value }
+                          })}
+                        />
+                      </div>
+                      <div className="space-y-4">
+                        <Input 
+                          label="E-mail do 3º Administrador" 
+                          icon={Mail} 
+                          type="email"
+                          placeholder="email@exemplo.com"
+                          value={configForm.event.admin3_email || ''}
+                          onChange={(e: any) => setConfigForm({
+                            ...configForm, 
+                            event: { ...configForm.event, admin3_email: e.target.value }
+                          })}
+                        />
+                        <Input 
+                          label="Senha do 3º Administrador" 
+                          icon={Lock} 
+                          type="password"
+                          placeholder="Definir nova senha"
+                          value={configForm.event.admin3_password || ''}
+                          onChange={(e: any) => setConfigForm({
+                            ...configForm, 
+                            event: { ...configForm.event, admin3_password: e.target.value }
+                          })}
+                        />
+                      </div>
                     </div>
                   </div>
 

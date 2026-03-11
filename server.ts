@@ -2021,14 +2021,34 @@ async function startServer() {
         );
 
         // Update roles for secondary admins
-        const adminEmails = [event.admin2_email, event.admin3_email].filter(Boolean);
+        const adminConfigs = [
+          { email: event.admin2_email, password: event.admin2_password },
+          { email: event.admin3_email, password: event.admin3_password }
+        ].filter(c => c.email);
         
         // Reset old secondary admins to guest (if they are not master)
         db.prepare("UPDATE usuarios SET role = 'guest' WHERE role = 'admin' AND is_master = 0").run();
         
         // Set new secondary admins
-        for (const email of adminEmails) {
-          db.prepare("UPDATE usuarios SET role = 'admin' WHERE LOWER(email) = LOWER(?) AND is_master = 0").run(email);
+        for (const config of adminConfigs) {
+          const existing = db.prepare("SELECT id FROM usuarios WHERE LOWER(email) = LOWER(?)").get(config.email) as any;
+          
+          if (existing) {
+            // Update existing user
+            if (config.password) {
+              const hash = bcrypt.hashSync(config.password, 10);
+              db.prepare("UPDATE usuarios SET role = 'admin', senha_hash = ? WHERE id = ? AND is_master = 0").run(hash, existing.id);
+            } else {
+              db.prepare("UPDATE usuarios SET role = 'admin' WHERE id = ? AND is_master = 0").run(existing.id);
+            }
+          } else if (config.password) {
+            // Create new admin user if password provided
+            const hash = bcrypt.hashSync(config.password, 10);
+            db.prepare(`
+              INSERT INTO usuarios (nome, email, senha_hash, role, status, is_master) 
+              VALUES (?, ?, ?, 'admin', 'ativo', 0)
+            `).run(config.email.split('@')[0], config.email, hash);
+          }
         }
 
         db.prepare(`
