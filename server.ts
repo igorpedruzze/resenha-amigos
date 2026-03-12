@@ -203,6 +203,7 @@ async function startServer() {
       prazo_rsvp TEXT,
       admin2_email TEXT,
       admin3_email TEXT,
+      ativo INTEGER DEFAULT 1,
       tpl_welcome TEXT,
       tpl_approval_guest TEXT,
       tpl_approval_companion TEXT,
@@ -237,6 +238,10 @@ async function startServer() {
   try {
     db.exec("ALTER TABLE eventos ADD COLUMN admin2_email TEXT");
   } catch (e) {}
+  try {
+    db.exec("ALTER TABLE eventos ADD COLUMN ativo INTEGER DEFAULT 1");
+  } catch (e) {}
+
   try {
     db.exec("ALTER TABLE eventos ADD COLUMN admin3_email TEXT");
   } catch (e) {}
@@ -814,6 +819,7 @@ async function startServer() {
       flyer_dashboard: event.flyer_dashboard,
       limite_acompanhantes: event.limite_acompanhantes || 4,
       prazo_rsvp: event.prazo_rsvp,
+      ativo: event.ativo,
       admin_foto: admin?.foto_perfil || null,
       admin_whatsapp: admin?.whatsapp || null,
       capacidade_maxima: event.capacidade_maxima || 50,
@@ -833,12 +839,16 @@ async function startServer() {
       return res.status(400).json({ error: "Nome, E-mail, WhatsApp e Senha são obrigatórios." });
     }
 
+    const event = getActiveEvent();
+    if (event && event.ativo === 0) {
+      return res.status(403).json({ error: "As inscrições para este evento estão encerradas ou o evento está inativo no momento." });
+    }
+
     if (!validatePhone(whatsapp)) {
       return res.status(400).json({ error: "Por favor, informe um número de WhatsApp válido com DDD (ex: 11 99999-9999)." });
     }
 
     // Validate companions count
-    const event = getActiveEvent();
     if (!event) return res.status(404).json({ error: "Evento não encontrado" });
 
     // Security: Validate capacity before signup
@@ -865,6 +875,14 @@ async function startServer() {
         return res.status(400).json({ error: "Seu cadastro já foi realizado. Aguarde a ativação pelos organizadores." });
       }
       return res.status(400).json({ error: "Este e-mail ou instagram já está cadastrado." });
+    }
+
+    // Check if instagram exists in acompanhantes table
+    if (instagram) {
+      const existingCompanion = db.prepare("SELECT id FROM acompanhantes WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?)").get(instagram);
+      if (existingCompanion) {
+        return res.status(400).json({ error: "Este perfil já está registrado como acompanhante de outro convidado." });
+      }
     }
 
     // Password complexity validation: min 6 chars, 1 letter
@@ -1028,6 +1046,10 @@ async function startServer() {
         if (!user.role) user.role = 'guest';
 
         if (user.role === 'guest') {
+          const event = getActiveEvent();
+          if (event && event.ativo === 0) {
+            return res.status(403).json({ error: "O evento está inativo no momento. O acesso ao painel está temporariamente suspenso." });
+          }
           if (user.status === 'pendente') {
             return res.status(403).json({ error: "Cadastro recebido! O organizador está analisando sua solicitação. Você receberá uma confirmação em breve." });
           }
@@ -1316,6 +1338,21 @@ async function startServer() {
         return res.status(400).json({ error: "Não é possível adicionar acompanhantes após a quitação do convite." });
       }
 
+      // Strict Instagram Validation for Companions
+      if (instagram) {
+        // 1. Check if already a main guest
+        const existingMainUser = db.prepare("SELECT id FROM usuarios WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?)").get(instagram);
+        if (existingMainUser) {
+          return res.status(400).json({ error: "Este perfil já possui um cadastro individual e não pode ser adicionado como acompanhante." });
+        }
+
+        // 2. Check if already a companion of someone else
+        const existingCompanion = db.prepare("SELECT id FROM acompanhantes WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?)").get(instagram);
+        if (existingCompanion) {
+          return res.status(400).json({ error: "Este perfil já está registrado como acompanhante de outro convidado." });
+        }
+      }
+
       db.prepare("INSERT INTO acompanhantes (usuario_id, nome, instagram, status) VALUES (?, ?, ?, 'pendente_aprovacao')").run(userId, nome, instagram);
       
       addLog(userId, user?.nome || 'Usuário', 'Solicitação de Acompanhante', `Convidado ${user?.nome} solicitou a adição do acompanhante ${nome}. Aguardando aprovação.`);
@@ -1462,6 +1499,19 @@ async function startServer() {
 
     const event = getActiveEvent();
     const count = parseInt(acompanhantes_count) || 0;
+
+    // Duplicity check for Admin
+    if (instagram) {
+      const existingUser = db.prepare("SELECT id FROM usuarios WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?)").get(instagram);
+      if (existingUser) {
+        return res.status(400).json({ error: "Este instagram já possui um cadastro individual." });
+      }
+      const existingCompanion = db.prepare("SELECT id FROM acompanhantes WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?)").get(instagram);
+      if (existingCompanion) {
+        return res.status(400).json({ error: "Este instagram já está registrado como acompanhante de outro convidado." });
+      }
+    }
+
     const perPerson = event ? event.valor_por_pessoa : 0;
     const finalValue = valor_total !== undefined ? Number(valor_total) : (perPerson * (1 + count));
     const guestCode = generateGuestCode();
@@ -1490,6 +1540,20 @@ async function startServer() {
 
     try {
       const oldGuest = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(id) as any;
+      if (!oldGuest) return res.status(404).json({ error: "Convidado não encontrado" });
+
+      // Duplicity check for Admin Update
+      if (instagram && instagram.toLowerCase() !== (oldGuest.instagram || '').toLowerCase()) {
+        const existingUser = db.prepare("SELECT id FROM usuarios WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?) AND id != ?").get(instagram, id);
+        if (existingUser) {
+          return res.status(400).json({ error: "Este instagram já possui um cadastro individual." });
+        }
+        const existingCompanion = db.prepare("SELECT id FROM acompanhantes WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?)").get(instagram);
+        if (existingCompanion) {
+          return res.status(400).json({ error: "Este instagram já está registrado como acompanhante de outro convidado." });
+        }
+      }
+
       db.prepare(
         "UPDATE usuarios SET nome = ?, email = ?, whatsapp = ?, instagram = ?, valor_total = ?, acompanhantes_count = ?, rsvp_status = ? WHERE id = ?"
       ).run(nome, email, whatsapp, instagram, valor_total, acompanhantes_count, rsvp_status, id);
@@ -2117,7 +2181,8 @@ async function startServer() {
         limite_acompanhantes: event.limite_acompanhantes || 4,
         prazo_rsvp: event.prazo_rsvp || "",
         admin2_email: event.admin2_email || "",
-        admin3_email: event.admin3_email || ""
+        admin3_email: event.admin3_email || "",
+        ativo: event.ativo === 1
       },
       organizador: {
         nome: admin.nome,
@@ -2169,7 +2234,8 @@ async function startServer() {
             limite_acompanhantes = ?,
             prazo_rsvp = ?,
             admin2_email = ?,
-            admin3_email = ?
+            admin3_email = ?,
+            ativo = ?
           WHERE id = ?
         `).run(
           event.nome, 
@@ -2195,6 +2261,7 @@ async function startServer() {
           event.prazo_rsvp,
           event.admin2_email,
           event.admin3_email,
+          event.ativo === false ? 0 : 1,
           activeEvent.id
         );
 

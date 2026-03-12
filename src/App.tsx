@@ -53,6 +53,8 @@ import {
   Download,
   Camera,
   AlertCircle,
+  AlertTriangle,
+  Power,
   Copy,
   RotateCcw,
   UserCheck,
@@ -114,6 +116,7 @@ interface EventConfig {
   admin2_password?: string;
   admin3_email?: string;
   admin3_password?: string;
+  ativo?: boolean;
 }
 
 interface OrganizerConfig {
@@ -612,7 +615,8 @@ export default function App() {
     admin_whatsapp?: string,
     prazo_rsvp?: string,
     capacidade_maxima?: number,
-    ocupacao_atual?: number
+    ocupacao_atual?: number,
+    ativo?: number
   } | null>(null);
   const [pendingPayments, setPendingPayments] = useState<Payment[]>([]);
   const [guests, setGuests] = useState<UserData[]>([]);
@@ -673,7 +677,8 @@ export default function App() {
       admin2_email: '',
       admin2_password: '',
       admin3_email: '',
-      admin3_password: ''
+      admin3_password: '',
+      ativo: true
     },
     organizador: { nome: '', email: '', whatsapp: '' }
   });
@@ -1974,6 +1979,52 @@ export default function App() {
     }
   };
 
+  if (publicEvent?.ativo === 0 && user?.role !== 'admin') {
+    return (
+      <div className="min-h-screen bg-slate-50 font-sans flex flex-col items-center justify-center p-6 text-center">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="max-w-md w-full bg-white p-10 rounded-[40px] shadow-2xl border border-slate-100"
+        >
+          <div className="size-24 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-8">
+            <AlertTriangle className="size-12" />
+          </div>
+          <h1 className="text-3xl font-black text-slate-900 uppercase tracking-tighter mb-4">Evento Indisponível</h1>
+          <p className="text-slate-500 font-medium leading-relaxed mb-8">
+            No momento não temos nenhum evento ativo para inscrições ou acesso ao painel. 
+            <span className="block mt-2 font-bold text-slate-700">Fique atento às nossas redes sociais para novidades!</span>
+          </p>
+          <div className="pt-6 border-t border-slate-100">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Dúvidas? Fale com o Organizador</p>
+            {publicEvent?.admin_whatsapp && (
+              <a 
+                href={`https://wa.me/${publicEvent.admin_whatsapp.replace(/\D/g, '')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-200"
+              >
+                <MessageCircle className="size-4" />
+                WhatsApp do Organizador
+              </a>
+            )}
+          </div>
+          {user && (
+            <button 
+              onClick={handleLogout}
+              className="mt-8 text-xs font-black text-slate-400 uppercase tracking-widest hover:text-red-500 transition-colors"
+            >
+              Sair da Conta
+            </button>
+          )}
+        </motion.div>
+        <p className="mt-8 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+          {publicEvent?.nome || 'Minha Resenha'} &copy; {new Date().getFullYear()}
+        </p>
+      </div>
+    );
+  }
+
   if (view === 'signup' || view === 'login' || view === 'forgot-password' || view === 'reset-password') {
     return (
       <div className="min-h-screen bg-white font-sans flex flex-col">
@@ -3159,7 +3210,9 @@ export default function App() {
                 <Plus className="size-6" />
               </button>
               <h2 className="text-lg md:text-xl font-bold tracking-tight truncate max-w-[150px] md:max-w-none">Dashboard de Evento</h2>
-              <span className="px-3 py-1 bg-blue-100 text-blue-600 text-[10px] font-bold rounded-full hidden sm:inline">ATIVO</span>
+              <span className={`px-3 py-1 text-[10px] font-bold rounded-full hidden sm:inline ${publicEvent?.ativo !== 0 ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600'}`}>
+                {publicEvent?.ativo !== 0 ? 'ATIVO' : 'INATIVO'}
+              </span>
             </div>
             <div className="flex items-center gap-2 md:gap-4">
               <button className={`p-2 rounded-lg relative transition-colors ${hasPendingActions ? 'text-red-500 bg-red-50' : 'text-slate-500 hover:bg-slate-100'}`}>
@@ -4746,6 +4799,28 @@ export default function App() {
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                       <div className="space-y-6">
+                        <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-200">
+                          <div className="flex items-center gap-3">
+                            <div className={`size-10 rounded-full flex items-center justify-center ${configForm.event.ativo ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
+                              <Power className="size-5" />
+                            </div>
+                            <div>
+                              <p className="font-bold text-slate-900">Status do Evento</p>
+                              <p className="text-xs text-slate-500">{configForm.event.ativo ? 'Evento Ativo - Convidados podem acessar' : 'Evento Inativo - Acesso bloqueado para convidados'}</p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setConfigForm({ ...configForm, event: { ...configForm.event, ativo: !configForm.event.ativo } })}
+                            className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+                              configForm.event.ativo 
+                                ? 'bg-red-100 text-red-600 hover:bg-red-200' 
+                                : 'bg-green-600 text-white hover:bg-green-700 shadow-lg shadow-green-200'
+                            }`}
+                          >
+                            {configForm.event.ativo ? 'Desativar' : 'Ativar'}
+                          </button>
+                        </div>
                         <Input 
                           label="Nome do Evento" 
                           icon={PartyPopper} 
