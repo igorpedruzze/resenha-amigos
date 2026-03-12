@@ -9,7 +9,10 @@ import { Resend } from "resend";
 import sharp from "sharp";
 import bcrypt from "bcryptjs";
 import session from "express-session";
+import SQLiteStoreFactory from "better-sqlite3-session-store";
 import { randomBytes } from "crypto";
+
+const SQLiteStore = SQLiteStoreFactory(session);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -709,8 +712,15 @@ async function startServer() {
   // Session configuration
   const sessionSecret = process.env.SESSION_SECRET || 'resenha-secret-key-default-123';
   app.use(session({
+    store: new SQLiteStore({
+      client: db,
+      expired: {
+        clear: true,
+        intervalMs: 900000 // 15 minutes
+      }
+    }),
     secret: sessionSecret,
-    resave: true,
+    resave: false,
     saveUninitialized: false,
     name: 'resenha_session',
     proxy: true,
