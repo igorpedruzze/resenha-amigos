@@ -2033,6 +2033,13 @@ async function startServer() {
             db.prepare("DELETE FROM acompanhantes WHERE status = 'pendente_aprovacao'").run();
             db.prepare("DELETE FROM usuarios WHERE status IN ('pendente', 'recusado') AND is_master = 0 AND role != 'admin'").run();
             break;
+          case 'status_unapproved':
+            db.prepare("UPDATE usuarios SET status = 'pendente' WHERE is_master = 0 AND role != 'admin'").run();
+            db.prepare("UPDATE acompanhantes SET status = 'pendente_aprovacao'").run();
+            break;
+          case 'status_unconfirmed':
+            db.prepare("UPDATE usuarios SET confirmado = 0 WHERE is_master = 0 AND role != 'admin'").run();
+            break;
           case 'logs':
             db.prepare("DELETE FROM logs_atividades").run();
             break;

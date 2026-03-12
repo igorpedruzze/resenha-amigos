@@ -4375,6 +4375,24 @@ export default function App() {
                     </button>
 
                     <button 
+                      onClick={() => handleCleanup('status_unapproved', 'mudar o status de TODOS para não aprovado')}
+                      className="flex flex-col items-start p-4 rounded-2xl border border-slate-100 hover:border-amber-200 hover:bg-amber-50 transition-all text-left group"
+                    >
+                      <UserCheck className="size-5 text-amber-600 mb-2" />
+                      <span className="font-bold text-slate-900 text-sm">Resetar Aprovações</span>
+                      <span className="text-[10px] text-slate-500">Muda todos para "pendente" (convidados e acomp).</span>
+                    </button>
+
+                    <button 
+                      onClick={() => handleCleanup('status_unconfirmed', 'mudar TODOS para não confirmado')}
+                      className="flex flex-col items-start p-4 rounded-2xl border border-slate-100 hover:border-amber-200 hover:bg-amber-50 transition-all text-left group"
+                    >
+                      <Clock className="size-5 text-amber-600 mb-2" />
+                      <span className="font-bold text-slate-900 text-sm">Resetar Confirmações</span>
+                      <span className="text-[10px] text-slate-500">Muda todos os convidados para "não confirmado".</span>
+                    </button>
+
+                    <button 
                       onClick={() => handleCleanup('logs', 'limpar todos os logs de atividades')}
                       className="flex flex-col items-start p-4 rounded-2xl border border-slate-100 hover:border-red-200 hover:bg-red-50 transition-all text-left group"
                     >
