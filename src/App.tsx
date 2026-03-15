@@ -63,13 +63,20 @@ import {
   UserCheck,
   UserX,
   MoreVertical,
-  Ban
+  Ban,
+  FileDown,
+  QrCode as QrCodeIcon,
+  Save
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { QRCodeCanvas } from 'qrcode.react';
+import { Html5QrcodeScanner } from 'html5-qrcode';
+import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
 import SaaSLanding from './components/SaaSLanding';
+import PortariaView from './components/PortariaView';
 
 // Types
 interface UserData {
@@ -162,20 +169,6 @@ interface BalanceData {
   info_texto?: string;
   flyer_info?: string;
 }
-
-import { 
-  PieChart, 
-  Pie, 
-  Cell, 
-  ResponsiveContainer, 
-  Tooltip, 
-  Legend,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid
-} from 'recharts';
 
 interface Cost {
   id?: number;
@@ -616,8 +609,8 @@ const CostsView = ({ costs, sales, onSaveCosts, onSaveSales, onPrint }: { costs:
 
 export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [view, setView] = useState<'landing' | 'signup' | 'login' | 'dashboard' | 'admin' | 'forgot-password' | 'reset-password' | 'superadmin' | 'organizer-signup'>('landing');
-  const [adminTab, setAdminTab] = useState<'stats' | 'validation' | 'guests' | 'messages_zap' | 'messages_email' | 'bulk_email' | 'costs' | 'settings' | 'logs' | 'maintenance'>('stats');
+  const [view, setView] = useState<'landing' | 'signup' | 'login' | 'dashboard' | 'admin' | 'forgot-password' | 'reset-password' | 'superadmin' | 'organizer-signup' | 'portaria'>('landing');
+  const [adminTab, setAdminTab] = useState<'stats' | 'validation' | 'guests' | 'messages_zap' | 'messages_email' | 'bulk_email' | 'costs' | 'settings' | 'logs' | 'maintenance' | 'staff'>('stats');
   const [backups, setBackups] = useState<any[]>([]);
   const [isGeneratingBackup, setIsGeneratingBackup] = useState(false);
   const [user, setUser] = useState<UserData | null>(null);
@@ -727,6 +720,7 @@ export default function App() {
     amount: number;
     newBalance: number;
     type: 'manual' | 'approval';
+    companionCount?: number;
   } | null>(null);
   const [guestFilter, setGuestFilter] = useState<'ativo' | 'pendente' | 'recusado'>('ativo');
   const [searchQuery, setSearchQuery] = useState('');
@@ -735,6 +729,96 @@ export default function App() {
   const [showUpdateAllConfirm, setShowUpdateAllConfirm] = useState(false);
   const [showRefundModal, setShowRefundModal] = useState(false);
   const [refundData, setRefundData] = useState({ userId: 0, userName: '', amount: '', reason: '' });
+  const [selectedCompanionQR, setSelectedCompanionQR] = useState<any>(null);
+
+  const [staff, setStaff] = useState<any[]>([]);
+  const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
+  const [staffForm, setStaffForm] = useState({ nome: '', email: '', senha: '' });
+  const [isSendingQR, setIsSendingQR] = useState<string | null>(null);
+
+  const fetchStaff = async () => {
+    try {
+      const res = await fetch('/api/staff');
+      if (res.ok) {
+        const data = await res.json();
+        setStaff(data);
+      }
+    } catch (error) {
+      console.error('Error fetching staff:', error);
+    }
+  };
+
+  const handleCreateStaff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/staff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(staffForm)
+      });
+      if (res.ok) {
+        showToast('Membro da equipe cadastrado!', 'success');
+        setIsStaffModalOpen(false);
+        setStaffForm({ nome: '', email: '', senha: '' });
+        fetchStaff();
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Erro ao cadastrar', 'error');
+      }
+    } catch (error) {
+      showToast('Erro de conexão', 'error');
+    }
+  };
+
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setConfirmModal({ isOpen: true, title, message, onConfirm });
+  };
+
+  const handleDeleteStaff = async (id: number) => {
+    showConfirm('Remover Membro', 'Tem certeza que deseja remover este membro da equipe?', async () => {
+      try {
+        const res = await fetch(`/api/staff/${id}`, { method: 'DELETE' });
+        if (res.ok) {
+          showToast('Membro removido');
+          fetchStaff();
+        }
+      } catch (error) {
+        showToast('Erro de conexão', 'error');
+      }
+    });
+  };
+
+  const handleSendQRCode = async (type: 'guest' | 'companion', id: number) => {
+    setIsSendingQR(`${type}-${id}`);
+    try {
+      const res = await fetch('/api/send-qr-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, id })
+      });
+      if (res.ok) {
+        showToast('QR Code enviado por e-mail!', 'success');
+      } else {
+        showToast('Erro ao enviar QR Code', 'error');
+      }
+    } catch (error) {
+      showToast('Erro de conexão', 'error');
+    } finally {
+      setIsSendingQR(null);
+    }
+  };
 
   const hasPendingActions = pendingPayments.length > 0 || 
     guests.some(g => g.status === 'pendente') ||
@@ -836,44 +920,46 @@ export default function App() {
   };
 
   const handleRestoreBackup = async (id: number) => {
-    if (!window.confirm('Tem certeza que deseja restaurar este backup? Todos os dados atuais serão substituídos.')) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/admin/backups/${id}/restore`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      if (res.ok) {
-        showToast('Sistema restaurado com sucesso!');
-        window.location.reload();
-      } else {
-        const data = await res.json();
-        showToast(data.error || 'Erro ao restaurar backup', 'error');
+    showConfirm('Restaurar Backup', 'Tem certeza que deseja restaurar este backup? Todos os dados atuais serão substituídos.', async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/admin/backups/${id}/restore`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (res.ok) {
+          showToast('Sistema restaurado com sucesso!');
+          window.location.reload();
+        } else {
+          const data = await res.json();
+          showToast(data.error || 'Erro ao restaurar backup', 'error');
+        }
+      } catch (error) {
+        showToast('Erro de conexão', 'error');
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      showToast('Erro de conexão', 'error');
-    } finally {
-      setLoading(false);
-    }
+    });
   };
 
   const handleDeleteBackup = async (id: number) => {
-    if (!window.confirm('Tem certeza que deseja excluir este backup?')) return;
-    try {
-      const res = await fetch(`/api/admin/backups/${id}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      if (res.ok) {
-        showToast('Backup excluído!');
-        fetchBackups();
-      } else {
-        const data = await res.json();
-        showToast(data.error || 'Erro ao excluir backup', 'error');
+    showConfirm('Excluir Backup', 'Tem certeza que deseja excluir este backup?', async () => {
+      try {
+        const res = await fetch(`/api/admin/backups/${id}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (res.ok) {
+          showToast('Backup excluído!');
+          fetchBackups();
+        } else {
+          const data = await res.json();
+          showToast(data.error || 'Erro ao excluir backup', 'error');
+        }
+      } catch (error) {
+        showToast('Erro de conexão', 'error');
       }
-    } catch (error) {
-      showToast('Erro de conexão', 'error');
-    }
+    });
   };
 
   const handleDownloadBackup = async (id: number, nome: string) => {
@@ -888,21 +974,21 @@ export default function App() {
     reader.onload = async (event) => {
       try {
         const data = JSON.parse(event.target?.result as string);
-        if (!window.confirm('Tem certeza que deseja importar este backup? Todos os dados atuais serão substituídos.')) return;
-        
-        setLoading(true);
-        const res = await fetch('/api/admin/backups/import', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ data })
+        showConfirm('Importar Backup', 'Tem certeza que deseja importar este backup? Todos os dados atuais serão substituídos.', async () => {
+          setLoading(true);
+          const res = await fetch('/api/admin/backups/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data })
+          });
+          if (res.ok) {
+            showToast('Backup importado com sucesso!');
+            window.location.reload();
+          } else {
+            const data = await res.json();
+            showToast(data.error || 'Erro ao importar backup', 'error');
+          }
         });
-        if (res.ok) {
-          showToast('Backup importado com sucesso!');
-          window.location.reload();
-        } else {
-          const data = await res.json();
-          showToast(data.error || 'Erro ao importar backup', 'error');
-        }
       } catch (error) {
         showToast('Arquivo de backup inválido', 'error');
       } finally {
@@ -913,31 +999,31 @@ export default function App() {
   };
 
   const handleCleanup = async (type: string, label: string) => {
-    if (!window.confirm(`ATENÇÃO: Você tem certeza que deseja ${label}? Esta ação não pode ser desfeita.`)) return;
-    
-    setLoading(true);
-    try {
-      const res = await fetch('/api/admin/maintenance/cleanup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type })
-      });
-      if (res.ok) {
-        showToast('Limpeza realizada com sucesso!');
-        if (type === 'reset_event' || type === 'guests_all') {
-          window.location.reload();
+    showConfirm('Confirmar Limpeza', `ATENÇÃO: Você tem certeza que deseja ${label}? Esta ação não pode ser desfeita.`, async () => {
+      setLoading(true);
+      try {
+        const res = await fetch('/api/admin/maintenance/cleanup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type })
+        });
+        if (res.ok) {
+          showToast('Limpeza realizada com sucesso!');
+          if (type === 'reset_event' || type === 'guests_all') {
+            window.location.reload();
+          } else {
+            fetchAdminStats();
+          }
         } else {
-          fetchAdminStats();
+          const data = await res.json();
+          showToast(data.error || 'Erro ao realizar limpeza', 'error');
         }
-      } else {
-        const data = await res.json();
-        showToast(data.error || 'Erro ao realizar limpeza', 'error');
+      } catch (error) {
+        showToast('Erro de conexão', 'error');
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      showToast('Erro de conexão', 'error');
-    } finally {
-      setLoading(false);
-    }
+    });
   };
 
   useEffect(() => {
@@ -1530,7 +1616,11 @@ export default function App() {
       const data = await res.json();
       if (res.ok) {
         setUser(data);
-        setView(data.role === 'admin' ? 'admin' : 'dashboard');
+        if (data.role === 'portaria') {
+          setView('portaria');
+        } else {
+          setView(data.role === 'admin' ? 'admin' : 'dashboard');
+        }
       } else {
         setAuthError(data.error || 'E-mail ou senha incorretos');
       }
@@ -1810,46 +1900,44 @@ export default function App() {
       return;
     }
 
-    if (!confirm(`Deseja enviar este informativo para ${filteredGuests.length} convidados? O envio será feito com intervalo de 20 segundos entre cada e-mail.`)) {
-      return;
-    }
+    showConfirm('Enviar Informativo', `Deseja enviar este informativo para ${filteredGuests.length} convidados? O envio será feito com intervalo de 20 segundos entre cada e-mail.`, async () => {
+      setIsBulkSending(true);
+      setBulkSendProgress({ current: 0, total: filteredGuests.length, status: 'Iniciando envio...' });
 
-    setIsBulkSending(true);
-    setBulkSendProgress({ current: 0, total: filteredGuests.length, status: 'Iniciando envio...' });
+      for (let i = 0; i < filteredGuests.length; i++) {
+        const guest = filteredGuests[i];
+        setBulkSendProgress({ current: i + 1, total: filteredGuests.length, status: `Enviando para ${guest.nome}...` });
 
-    for (let i = 0; i < filteredGuests.length; i++) {
-      const guest = filteredGuests[i];
-      setBulkSendProgress({ current: i + 1, total: filteredGuests.length, status: `Enviando para ${guest.nome}...` });
+        try {
+          const res = await fetch('/api/admin/send-custom-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: guest.id,
+              email: guest.email,
+              subject: `Informativo: ${config?.event.nome}`,
+              message: bulkEmailMessage
+            })
+          });
 
-      try {
-        const res = await fetch('/api/admin/send-custom-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: guest.id,
-            email: guest.email,
-            subject: `Informativo: ${config?.event.nome}`,
-            message: bulkEmailMessage
-          })
-        });
-
-        if (!res.ok) {
-          console.error(`Erro ao enviar para ${guest.email}`);
+          if (!res.ok) {
+            console.error(`Erro ao enviar para ${guest.email}`);
+          }
+        } catch (err) {
+          console.error(`Erro de conexão ao enviar para ${guest.email}`, err);
         }
-      } catch (err) {
-        console.error(`Erro de conexão ao enviar para ${guest.email}`, err);
+
+        if (i < filteredGuests.length - 1) {
+          setBulkSendProgress(prev => ({ ...prev, status: `Aguardando 20s para o próximo envio...` }));
+          await new Promise(resolve => setTimeout(resolve, 20000));
+        }
       }
 
-      if (i < filteredGuests.length - 1) {
-        setBulkSendProgress(prev => ({ ...prev, status: `Aguardando 20s para o próximo envio...` }));
-        await new Promise(resolve => setTimeout(resolve, 20000));
-      }
-    }
-
-    setIsBulkSending(false);
-    setBulkSendProgress({ current: 0, total: 0, status: '' });
-    showToast('Envio em massa concluído!');
-    setBulkEmailMessage('');
+      setIsBulkSending(false);
+      setBulkSendProgress({ current: 0, total: 0, status: '' });
+      showToast('Envio em massa concluído!');
+      setBulkEmailMessage('');
+    });
   };
 
   const handleUpdateAllGuestValues = async () => {
@@ -2739,6 +2827,31 @@ export default function App() {
           </div>
 
           <div className="grid grid-cols-1 gap-6 mb-8">
+            {/* QR Code Section */}
+            {user.rsvp_status === 'confirmado' && (
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-slate-200 flex flex-col items-center text-center"
+              >
+                <div className="bg-slate-100 p-4 rounded-3xl mb-4">
+                  <QRCodeCanvas 
+                    value={user.qr_code_id || user.codigo_convidado} 
+                    size={200}
+                    level="H"
+                    includeMargin={true}
+                  />
+                </div>
+                <h3 className="text-xl font-black text-slate-900 mb-2">Seu QR Code de Entrada</h3>
+                <p className="text-slate-500 text-sm max-w-xs">
+                  Apresente este código na portaria do evento para confirmar sua entrada.
+                </p>
+                <div className="mt-4 px-4 py-2 bg-slate-100 rounded-full">
+                  <span className="text-xs font-black text-slate-500 uppercase tracking-widest">ID: {user.qr_code_id || user.codigo_convidado}</span>
+                </div>
+              </motion.div>
+            )}
+
             {/* RSVP Section */}
             {showRSVP && (
               <motion.div 
@@ -3135,8 +3248,18 @@ export default function App() {
                             {c.instagram && <p className="text-xs text-slate-500">{c.instagram}</p>}
                           </div>
                         </div>
-                        <button 
-                          onClick={() => {
+                        <div className="flex items-center gap-2">
+                          {c.status === 'aprovado' && (
+                            <button 
+                              onClick={() => setSelectedCompanionQR(c)}
+                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Ver QR Code"
+                            >
+                              <QrCodeIcon className="size-4" />
+                            </button>
+                          )}
+                          <button 
+                            onClick={() => {
                             if (companionDeleteConfirmId === c.id) {
                               handleRemoveCompanion(c.id);
                             } else {
@@ -3151,7 +3274,8 @@ export default function App() {
                           {companionDeleteConfirmId === c.id ? <Check className="size-4" /> : <Trash2 className="size-4" />}
                         </button>
                       </div>
-                    ))}
+                    </div>
+                  ))}
                     {companions.length === 0 && (
                       <div className="py-8 text-center border-2 border-dashed border-slate-100 rounded-2xl">
                         <Users className="size-8 text-slate-200 mx-auto mb-2" />
@@ -3162,6 +3286,44 @@ export default function App() {
                 </>
               )}
             </div>
+
+            {/* Modal QR Code Acompanhante */}
+            <AnimatePresence>
+              {selectedCompanionQR && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+                  <motion.div 
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.9, opacity: 0 }}
+                    className="bg-white rounded-3xl p-8 w-full max-w-sm shadow-2xl text-center"
+                  >
+                    <div className="flex justify-between items-center mb-6">
+                      <h3 className="text-xl font-black text-slate-900">QR Code: {selectedCompanionQR.nome}</h3>
+                      <button onClick={() => setSelectedCompanionQR(null)} className="p-2 text-slate-400 hover:text-slate-600">
+                        <X className="size-6" />
+                      </button>
+                    </div>
+                    <div className="bg-slate-100 p-4 rounded-3xl mb-4 inline-block">
+                      <QRCodeCanvas 
+                        value={selectedCompanionQR.qr_code_id || `COMP-${selectedCompanionQR.id}`} 
+                        size={200}
+                        level="H"
+                        includeMargin={true}
+                      />
+                    </div>
+                    <p className="text-slate-500 text-sm">
+                      Apresente este código na portaria para confirmar a entrada do acompanhante.
+                    </p>
+                    <button 
+                      onClick={() => setSelectedCompanionQR(null)}
+                      className="w-full mt-6 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase tracking-wider hover:bg-slate-200 transition-colors"
+                    >
+                      Fechar
+                    </button>
+                  </motion.div>
+                </div>
+              )}
+            </AnimatePresence>
 
             {/* Histórico de Pagamentos */}
             <div className="flex flex-col gap-4">
@@ -3319,6 +3481,10 @@ export default function App() {
     );
   }
 
+  if (view === 'portaria' && user) {
+    return <PortariaView user={user} onLogout={handleLogout} showToast={showToast} />;
+  }
+
   if (view === 'superadmin' && user) {
     return (
       <div className="min-h-screen bg-slate-50 font-sans flex overflow-hidden">
@@ -3471,6 +3637,13 @@ export default function App() {
             >
               <Send className="size-5" />
               <span>Informativo Envio</span>
+            </button>
+            <button 
+              onClick={() => { setAdminTab('staff'); setIsSidebarOpen(false); fetchStaff(); }}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${adminTab === 'staff' ? 'bg-white/10 text-white font-medium' : 'text-white/70 hover:bg-white/5 hover:text-white'}`}
+            >
+              <ShieldCheck className="size-5" />
+              <span>Equipe (Portaria)</span>
             </button>
             <button 
               onClick={() => { setAdminTab('logs'); setIsSidebarOpen(false); }}
@@ -3687,6 +3860,39 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+
+                  <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div className="px-6 py-5 border-b border-slate-200">
+                      <h4 className="font-bold text-slate-800">Status de Presença</h4>
+                    </div>
+                    <div className="p-6 h-[350px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={[
+                              { name: 'Presentes', value: adminStats.totalPresent },
+                              { name: 'Faltantes', value: Math.max(0, adminStats.totalConfirmed - adminStats.totalPresent) }
+                            ]}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={60}
+                            outerRadius={80}
+                            paddingAngle={5}
+                            dataKey="value"
+                          >
+                            <Cell fill="#10b981" />
+                            <Cell fill="#f1f5f9" />
+                          </Pie>
+                          <Tooltip />
+                          <Legend />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="text-center mt-[-180px] mb-[140px]">
+                        <p className="text-2xl font-black text-slate-900">{adminStats.totalPresent}</p>
+                        <p className="text-[10px] text-slate-400 font-bold uppercase">Check-ins</p>
+                      </div>
+                    </div>
+                  </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
                   <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -5512,6 +5718,114 @@ export default function App() {
               </div>
             )}
 
+            {adminTab === 'staff' && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center">
+                  <h2 className="text-2xl font-black text-slate-900">Equipe de Portaria</h2>
+                  <button 
+                    onClick={() => setIsStaffModalOpen(true)}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-blue-700 transition-colors"
+                  >
+                    <Plus className="size-4" />
+                    Novo Membro
+                  </button>
+                </div>
+
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50 text-slate-500 text-[10px] font-black uppercase tracking-wider">
+                      <tr>
+                        <th className="px-6 py-4">Nome</th>
+                        <th className="px-6 py-4">E-mail</th>
+                        <th className="px-6 py-4 text-right">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {staff.map((s) => (
+                        <tr key={s.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="px-6 py-4 font-bold text-slate-900">{s.nome}</td>
+                          <td className="px-6 py-4 text-slate-600">{s.email}</td>
+                          <td className="px-6 py-4 text-right">
+                            <button 
+                              onClick={() => handleDeleteStaff(s.id)}
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            >
+                              <Trash2 className="size-5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {staff.length === 0 && (
+                        <tr>
+                          <td colSpan={3} className="px-6 py-12 text-center text-slate-400 font-medium">
+                            Nenhum membro da equipe cadastrado.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {isStaffModalOpen && (
+                  <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+                    <motion.div 
+                      initial={{ scale: 0.9, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl"
+                    >
+                      <h3 className="text-2xl font-black text-slate-900 mb-6">Cadastrar Portaria</h3>
+                      <form onSubmit={handleCreateStaff} className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-2">Nome Completo</label>
+                          <input 
+                            type="text" 
+                            required
+                            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-medium"
+                            value={staffForm.nome}
+                            onChange={e => setStaffForm({ ...staffForm, nome: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-2">E-mail</label>
+                          <input 
+                            type="email" 
+                            required
+                            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-medium"
+                            value={staffForm.email}
+                            onChange={e => setStaffForm({ ...staffForm, email: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-black text-slate-500 uppercase tracking-wider mb-2">Senha</label>
+                          <input 
+                            type="password" 
+                            required
+                            className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-medium"
+                            value={staffForm.senha}
+                            onChange={e => setStaffForm({ ...staffForm, senha: e.target.value })}
+                          />
+                        </div>
+                        <div className="flex gap-4 pt-4">
+                          <button 
+                            type="button"
+                            onClick={() => setIsStaffModalOpen(false)}
+                            className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase tracking-wider hover:bg-slate-200 transition-colors"
+                          >
+                            Cancelar
+                          </button>
+                          <button 
+                            type="submit"
+                            className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-wider hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/20"
+                          >
+                            Cadastrar
+                          </button>
+                        </div>
+                      </form>
+                    </motion.div>
+                  </div>
+                )}
+              </div>
+            )}
             {adminTab === 'logs' && (
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
@@ -5959,6 +6273,44 @@ export default function App() {
           </AnimatePresence>
 
           {/* Notificação Flutuante WhatsApp */}
+          {/* Modal de Confirmação Customizado */}
+          <AnimatePresence>
+            {confirmModal.isOpen && (
+              <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-sm">
+                <motion.div 
+                  initial={{ scale: 0.9, opacity: 0 }} 
+                  animate={{ scale: 1, opacity: 1 }} 
+                  exit={{ scale: 0.9, opacity: 0 }}
+                  className="bg-white w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden"
+                >
+                  <div className="p-6 border-b border-slate-100">
+                    <h3 className="text-lg font-black text-slate-900">{confirmModal.title}</h3>
+                  </div>
+                  <div className="p-6">
+                    <p className="text-slate-600 font-medium">{confirmModal.message}</p>
+                  </div>
+                  <div className="p-6 bg-slate-50 flex gap-3">
+                    <button 
+                      onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                      className="flex-1 py-3 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-100 transition-all"
+                    >
+                      Cancelar
+                    </button>
+                    <button 
+                      onClick={() => {
+                        confirmModal.onConfirm();
+                        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                      }}
+                      className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-all shadow-lg shadow-red-200"
+                    >
+                      Confirmar
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
           <AnimatePresence>
             {lastActionNotification && (
               <motion.div 

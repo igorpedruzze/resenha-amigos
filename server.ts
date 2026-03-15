@@ -331,6 +331,19 @@ async function startServer() {
     db.exec("ALTER TABLE organizations ADD COLUMN plan_id INTEGER REFERENCES plans(id)");
   } catch (e) {}
 
+  try {
+    db.exec("ALTER TABLE usuarios ADD COLUMN qr_code_id TEXT UNIQUE");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE usuarios ADD COLUMN checkin_at DATETIME");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE acompanhantes ADD COLUMN qr_code_id TEXT UNIQUE");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE acompanhantes ADD COLUMN checkin_at DATETIME");
+  } catch (e) {}
+
   // Seed Default Plans if none exist
   const hasPlans = db.prepare("SELECT COUNT(*) as count FROM plans").get() as any;
   if (hasPlans.count === 0) {
@@ -865,48 +878,6 @@ async function startServer() {
     return digits.length >= 10 && digits.length <= 11;
   };
 
-  const app = express();
-  app.set('trust proxy', 1); // Trust first proxy (Railway/Cloud Run)
-  app.use(express.json({ limit: '15mb' }));
-  app.use(express.urlencoded({ limit: '15mb', extended: true }));
-
-  // Session configuration
-  const sessionSecret = process.env.SESSION_SECRET || 'resenha-secret-key-default-123';
-  app.use(session({
-    store: new SQLiteStore({
-      client: db,
-      expired: {
-        clear: true,
-        intervalMs: 900000 // 15 minutes
-      }
-    }),
-    secret: sessionSecret,
-    resave: false,
-    saveUninitialized: false,
-    name: 'resenha_session',
-    proxy: true,
-    cookie: {
-      httpOnly: true,
-      secure: true, // Required for SameSite=None
-      sameSite: 'none', // Required for Iframe compatibility
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      path: '/'
-    }
-  }));
-  
-  // Prevent directory listing middleware
-  const noDirectoryListing = (req: any, res: any, next: any) => {
-    if (req.url.endsWith('/')) {
-      return res.status(403).send('Acesso negado');
-    }
-    next();
-  };
-
-  // Serve uploaded files
-  app.use('/uploads', noDirectoryListing, express.static(uploadDir));
-  app.use('/perfil', noDirectoryListing, express.static(perfilDir));
-
-  // SaaS Middlewares - Ensures total data isolation between organizations
   const authMiddleware = (req: any, res: any, next: any) => {
     const userId = (req.session as any).userId;
     const orgId = (req.session as any).organizationId;
@@ -967,6 +938,228 @@ async function startServer() {
     return (activeGuests.count || 0) + (activeCompanions.count || 0);
   };
 
+  const app = express();
+  app.set('trust proxy', 1); // Trust first proxy (Railway/Cloud Run)
+  app.use(express.json({ limit: '15mb' }));
+  app.use(express.urlencoded({ limit: '15mb', extended: true }));
+
+  // Session configuration
+  const sessionSecret = process.env.SESSION_SECRET || 'resenha-secret-key-default-123';
+  app.use(session({
+    store: new SQLiteStore({
+      client: db,
+      expired: {
+        clear: true,
+        intervalMs: 900000 // 15 minutes
+      }
+    }),
+    secret: sessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    name: 'resenha_session',
+    proxy: true,
+    cookie: {
+      httpOnly: true,
+      secure: true, // Required for SameSite=None
+      sameSite: 'none', // Required for Iframe compatibility
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      path: '/'
+    }
+  }));
+  
+  // Prevent directory listing middleware
+  const noDirectoryListing = (req: any, res: any, next: any) => {
+    if (req.url.endsWith('/')) {
+      return res.status(403).send('Acesso negado');
+    }
+    next();
+  };
+
+  // Serve uploaded files
+  app.use('/uploads', noDirectoryListing, express.static(uploadDir));
+  app.use('/perfil', noDirectoryListing, express.static(perfilDir));
+
+  // Staff Management
+  app.get("/api/staff", adminMiddleware, (req: any, res) => {
+    const staff = db.prepare("SELECT id, nome, email, role FROM usuarios WHERE organization_id = ? AND role = 'portaria'").all(req.orgId);
+    res.json(staff);
+  });
+
+  app.post("/api/staff", adminMiddleware, async (req: any, res) => {
+    const { nome, email, senha } = req.body;
+    
+    // Limit to 2 staff members
+    const count = db.prepare("SELECT COUNT(*) as count FROM usuarios WHERE organization_id = ? AND role = 'portaria'").get(req.orgId) as any;
+    if (count.count >= 2) {
+      return res.status(400).json({ error: "Limite de 2 usuários de portaria atingido." });
+    }
+
+    try {
+      const senhaHash = await bcrypt.hash(senha, 10);
+      db.prepare("INSERT INTO usuarios (nome, email, senha_hash, role, organization_id, status) VALUES (?, ?, ?, 'portaria', ?, 'ativo')")
+        .run(nome, email, senhaHash, req.orgId);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(400).json({ error: "Email já cadastrado." });
+    }
+  });
+
+  app.delete("/api/staff/:id", adminMiddleware, (req: any, res) => {
+    db.prepare("DELETE FROM usuarios WHERE id = ? AND organization_id = ? AND role = 'portaria'").run(req.params.id, req.orgId);
+    res.json({ success: true });
+  });
+
+  // Check-in API (Search)
+  app.get("/api/checkin", authMiddleware, (req: any, res) => {
+    const { search } = req.query;
+    if (!search) return res.json([]);
+
+    const guests = db.prepare(`
+      SELECT 'guest' as type, id, nome, qr_code_id, checkin_at 
+      FROM usuarios 
+      WHERE organization_id = ? AND role = 'guest' AND status = 'ativo'
+      AND (nome LIKE ? OR qr_code_id = ? OR codigo_convidado = ?)
+    `).all(req.orgId, `%${search}%`, search, search) as any[];
+
+    const companions = db.prepare(`
+      SELECT 'companion' as type, a.id, a.nome, a.qr_code_id, a.checkin_at 
+      FROM acompanhantes a
+      JOIN usuarios u ON a.usuario_id = u.id
+      WHERE a.organization_id = ? AND a.status = 'aprovado' AND u.status = 'ativo'
+      AND (a.nome LIKE ? OR a.qr_code_id = ? OR a.id = ?)
+    `).all(req.orgId, `%${search}%`, search, search) as any[];
+
+    res.json([...guests, ...companions]);
+  });
+
+  app.post("/api/checkin", authMiddleware, (req: any, res) => {
+    const { qrCodeId, manualId, type, id } = req.body;
+    const now = new Date().toISOString();
+
+    let person;
+
+    if (type && id) {
+      if (type === 'guest') {
+        person = db.prepare("SELECT 'guest' as type, id, nome, checkin_at FROM usuarios WHERE id = ? AND organization_id = ?").get(id, req.orgId);
+      } else {
+        person = db.prepare("SELECT 'companion' as type, id, nome, checkin_at FROM acompanhantes WHERE id = ? AND organization_id = ?").get(id, req.orgId);
+      }
+    } else {
+      // Check if it's a guest
+      person = db.prepare(`
+        SELECT 'guest' as type, id, nome, organization_id, checkin_at 
+        FROM usuarios 
+        WHERE (qr_code_id = ? OR codigo_convidado = ?) AND organization_id = ?
+      `).get(qrCodeId || '', manualId || '', req.orgId) as any;
+
+      if (!person) {
+        // Check if it's a companion
+        person = db.prepare(`
+          SELECT 'companion' as type, id, nome, organization_id, checkin_at 
+          FROM acompanhantes 
+          WHERE (qr_code_id = ? OR id = ?) AND organization_id = ?
+        `).get(qrCodeId || '', manualId || '', req.orgId) as any;
+      }
+    }
+
+    if (!person) {
+      return res.status(404).json({ error: "Convidado não encontrado ou não pertence a esta organização." });
+    }
+
+    if (person.checkin_at) {
+      return res.status(400).json({ error: `Check-in já realizado em ${new Date(person.checkin_at).toLocaleString('pt-BR')}` });
+    }
+
+    if (person.type === 'guest') {
+      db.prepare("UPDATE usuarios SET checkin_at = ? WHERE id = ?").run(now, person.id);
+    } else {
+      db.prepare("UPDATE acompanhantes SET checkin_at = ? WHERE id = ?").run(now, person.id);
+    }
+
+    res.json({ success: true, nome: person.nome, time: now });
+  });
+
+  // Send QR Code Email
+  app.post("/api/send-qr-email", adminMiddleware, async (req: any, res) => {
+    const { type, id } = req.body;
+    const event = getActiveEvent(req.orgId);
+    
+    let person;
+    if (type === 'guest') {
+      person = db.prepare("SELECT * FROM usuarios WHERE id = ? AND organization_id = ?").get(id, req.orgId) as any;
+    } else {
+      person = db.prepare(`
+        SELECT a.*, u.email as guest_email 
+        FROM acompanhantes a 
+        JOIN usuarios u ON a.usuario_id = u.id 
+        WHERE a.id = ? AND a.organization_id = ?
+      `).get(id, req.orgId) as any;
+    }
+
+    if (!person) return res.status(404).json({ error: "Não encontrado" });
+
+    // Ensure QR Code ID exists
+    if (!person.qr_code_id) {
+      const qrId = crypto.randomUUID();
+      if (type === 'guest') {
+        db.prepare("UPDATE usuarios SET qr_code_id = ? WHERE id = ?").run(qrId, id);
+        person.qr_code_id = qrId;
+      } else {
+        db.prepare("UPDATE acompanhantes SET qr_code_id = ? WHERE id = ?").run(qrId, id);
+        person.qr_code_id = qrId;
+      }
+    }
+
+    const targetEmail = type === 'guest' ? person.email : person.guest_email;
+    const qrUrl = `${event.system_url || process.env.APP_URL}/qr/${person.qr_code_id}`;
+    
+    const html = `
+      <p>Olá ${person.nome},</p>
+      <p>Aqui está o seu QR Code para entrada no evento <strong>${event.nome}</strong>.</p>
+      <p>Apresente este código na portaria:</p>
+      <div style="text-align: center; margin: 20px 0;">
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${person.qr_code_id}" alt="QR Code" />
+      </div>
+      <p>ID Único: ${person.qr_code_id}</p>
+    `;
+
+    const success = await sendEmail(req.orgId, targetEmail, `Seu QR Code - ${event.nome}`, html);
+    if (success) {
+      res.json({ success: true });
+    } else {
+      res.status(500).json({ error: "Falha ao enviar e-mail" });
+    }
+  });
+
+  // Update stats to include presence
+  app.get("/api/admin/stats", adminMiddleware, (req: any, res) => {
+    const event = getActiveEvent(req.orgId);
+    if (!event) return res.json({});
+
+    const guests = db.prepare(`
+      SELECT id, nome, email, whatsapp, status, rsvp_status, valor_total, codigo_convidado, checkin_at, qr_code_id
+      FROM usuarios 
+      WHERE organization_id = ? AND role = 'guest'
+    `).all(req.orgId) as any[];
+
+    // Add companions to guests
+    for (const guest of guests) {
+      guest.companions = db.prepare("SELECT id, nome, status, checkin_at, qr_code_id FROM acompanhantes WHERE usuario_id = ?").all(guest.id);
+    }
+
+    const totalConfirmed = guests.filter(g => g.rsvp_status === 'confirmado').length + 
+                          guests.reduce((acc, g) => acc + (g.companions?.filter((c: any) => c.status === 'aprovado').length || 0), 0);
+    
+    const totalPresent = guests.filter(g => g.checkin_at).length + 
+                        guests.reduce((acc, g) => acc + (g.companions?.filter((c: any) => c.checkin_at).length || 0), 0);
+
+    res.json({
+      eventValue: event.valor_por_pessoa,
+      totalConfirmed,
+      totalPresent,
+      guests
+    });
+  });
   // Helper to save base64 image to disk
   const saveBase64Image = (base64Str: string, prefix: string, customName?: string) => {
     if (!base64Str || !base64Str.startsWith('data:image/')) return base64Str;
