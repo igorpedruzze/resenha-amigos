@@ -11,6 +11,17 @@ import bcrypt from "bcryptjs";
 import session from "express-session";
 import SQLiteStoreFactory from "better-sqlite3-session-store";
 import { randomBytes } from "crypto";
+import multer from "multer";
+import { v2 as cloudinary } from "cloudinary";
+
+// Cloudinary Config
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 const SQLiteStore = SQLiteStoreFactory(session);
 
@@ -248,8 +259,21 @@ async function startServer() {
       value TEXT
     );
 
-    -- Insert default support whatsapp if not exists
+    CREATE TABLE IF NOT EXISTS home_banners (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      url TEXT NOT NULL,
+      ordem INTEGER DEFAULT 0
+    );
+
+    -- Insert default platform settings
     INSERT OR IGNORE INTO platform_settings (key, value) VALUES ('support_whatsapp', '28998847855');
+    INSERT OR IGNORE INTO platform_settings (key, value) VALUES ('platform_name', 'Convite Digital');
+    INSERT OR IGNORE INTO platform_settings (key, value) VALUES ('platform_logo', '');
+    INSERT OR IGNORE INTO platform_settings (key, value) VALUES ('platform_favicon', '');
+    INSERT OR IGNORE INTO platform_settings (key, value) VALUES ('primary_color', '#059669');
+    INSERT OR IGNORE INTO platform_settings (key, value) VALUES ('hero_title', 'Transforme seus eventos em experiências inesquecíveis');
+    INSERT OR IGNORE INTO platform_settings (key, value) VALUES ('hero_subtitle', 'A plataforma completa para gestão de convites, RSVP e pagamentos.');
+    INSERT OR IGNORE INTO platform_settings (key, value) VALUES ('footer_text', '© 2026 Convite Digital. Todos os direitos reservados.');
 
     CREATE TABLE IF NOT EXISTS usuarios (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1022,6 +1046,17 @@ async function startServer() {
       admin_foto: admin?.foto_perfil || null,
       admin_whatsapp: admin?.whatsapp || null
     });
+  });
+
+  app.get("/api/public/settings", (req, res) => {
+    try {
+      const settings = db.prepare("SELECT * FROM platform_settings").all() as any[];
+      const settingsMap = settings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {});
+      const banners = db.prepare("SELECT * FROM home_banners ORDER BY ordem ASC").all();
+      res.json({ settings: settingsMap, banners });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   app.post("/api/auth/register-organizer", (req, res) => {
@@ -2882,6 +2917,52 @@ async function startServer() {
     const { key, value } = req.body;
     try {
       db.prepare("INSERT OR REPLACE INTO platform_settings (key, value) VALUES (?, ?)").run(key, value);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/superadmin/upload", superAdminMiddleware, upload.single("file"), async (req: any, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "Nenhum arquivo enviado" });
+      
+      const b64 = Buffer.from(req.file.buffer).toString("base64");
+      let dataURI = "data:" + req.file.mimetype + ";base64," + b64;
+      const result = await cloudinary.uploader.upload(dataURI, {
+        resource_type: "auto",
+      });
+      
+      res.json({ url: result.secure_url });
+    } catch (error: any) {
+      console.error("Upload error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/superadmin/banners", superAdminMiddleware, (req, res) => {
+    try {
+      const banners = db.prepare("SELECT * FROM home_banners ORDER BY ordem ASC").all();
+      res.json(banners);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/superadmin/banners", superAdminMiddleware, (req, res) => {
+    const { url, ordem } = req.body;
+    try {
+      db.prepare("INSERT INTO home_banners (url, ordem) VALUES (?, ?)").run(url, ordem || 0);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/superadmin/banners/:id", superAdminMiddleware, (req, res) => {
+    const { id } = req.params;
+    try {
+      db.prepare("DELETE FROM home_banners WHERE id = ?").run(id);
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });

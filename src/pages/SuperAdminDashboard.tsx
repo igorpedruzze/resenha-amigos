@@ -9,7 +9,14 @@ import {
   PowerOff,
   Search,
   Activity,
-  ArrowRight
+  ArrowRight,
+  Image as ImageIcon,
+  Plus,
+  Trash2,
+  Upload,
+  Palette,
+  Type,
+  Layout
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -47,9 +54,11 @@ export default function SuperAdminDashboard() {
   const [stats, setStats] = useState<GlobalStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'orgs' | 'plans' | 'settings'>('orgs');
+  const [activeTab, setActiveTab] = useState<'orgs' | 'plans' | 'settings' | 'appearance'>('orgs');
   const [platformSettings, setPlatformSettings] = useState<Record<string, string>>({});
+  const [banners, setBanners] = useState<{id: number, url: string, ordem: number}[]>([]);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   
   // Plan Modal State
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
@@ -62,22 +71,25 @@ export default function SuperAdminDashboard() {
 
   const fetchData = async () => {
     try {
-      const [orgsRes, statsRes, plansRes, settingsRes] = await Promise.all([
+      const [orgsRes, statsRes, plansRes, settingsRes, bannersRes] = await Promise.all([
         fetch('/api/superadmin/organizations'),
         fetch('/api/superadmin/stats'),
         fetch('/api/superadmin/plans'),
-        fetch('/api/superadmin/settings')
+        fetch('/api/superadmin/settings'),
+        fetch('/api/superadmin/banners')
       ]);
       
-      if (orgsRes.ok && statsRes.ok && plansRes.ok && settingsRes.ok) {
+      if (orgsRes.ok && statsRes.ok && plansRes.ok && settingsRes.ok && bannersRes.ok) {
         const orgsData = await orgsRes.json();
         const statsData = await statsRes.json();
         const plansData = await plansRes.json();
         const settingsData = await settingsRes.json();
+        const bannersData = await bannersRes.json();
         setOrgs(orgsData);
         setStats(statsData);
         setPlans(plansData);
         setPlatformSettings(settingsData);
+        setBanners(bannersData);
       }
     } catch (error) {
       console.error('Error fetching superadmin data:', error);
@@ -175,6 +187,50 @@ export default function SuperAdminDashboard() {
     }
   };
 
+  const handleFileUpload = async (file: File, type: 'logo' | 'favicon' | 'banner') => {
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/superadmin/upload', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (type === 'logo') {
+          await updateSetting('platform_logo', data.url);
+        } else if (type === 'favicon') {
+          await updateSetting('platform_favicon', data.url);
+        } else if (type === 'banner') {
+          await fetch('/api/superadmin/banners', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: data.url, ordem: banners.length })
+          });
+          const bRes = await fetch('/api/superadmin/banners');
+          const bData = await bRes.json();
+          setBanners(bData);
+        }
+      }
+    } catch (error) {
+      console.error('Upload error:', error);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const deleteBanner = async (id: number) => {
+    try {
+      const res = await fetch(`/api/superadmin/banners/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setBanners(banners.filter(b => b.id !== id));
+      }
+    } catch (error) {
+      console.error('Delete banner error:', error);
+    }
+  };
+
   const filteredOrgs = orgs.filter(org => 
     org.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
     org.slug.toLowerCase().includes(searchTerm.toLowerCase())
@@ -250,6 +306,13 @@ export default function SuperAdminDashboard() {
         >
           Configurações
           {activeTab === 'settings' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600" />}
+        </button>
+        <button 
+          onClick={() => setActiveTab('appearance')}
+          className={`pb-4 px-2 font-medium transition-colors relative ${activeTab === 'appearance' ? 'text-emerald-600' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          Aparência Home
+          {activeTab === 'appearance' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600" />}
         </button>
       </div>
 
@@ -415,7 +478,7 @@ export default function SuperAdminDashboard() {
             ))}
           </div>
         </div>
-      ) : (
+      ) : activeTab === 'settings' ? (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 max-w-2xl">
           <h2 className="text-xl font-semibold text-slate-800 mb-6">Configurações da Plataforma</h2>
           <div className="space-y-6">
@@ -442,6 +505,156 @@ export default function SuperAdminDashboard() {
               <p className="text-xs text-slate-500 mt-2">
                 Este número será usado para os botões de "Suporte / Upgrade" no painel dos organizadores.
               </p>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-8">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* Text Content */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 space-y-6">
+              <h2 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
+                <Type className="text-emerald-600 w-5 h-5" />
+                Conteúdo da Home
+              </h2>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Nome da Plataforma</label>
+                  <input 
+                    type="text"
+                    className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                    value={platformSettings.platform_name || ''}
+                    onChange={(e) => setPlatformSettings({ ...platformSettings, platform_name: e.target.value })}
+                    onBlur={() => updateSetting('platform_name', platformSettings.platform_name)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Título Hero</label>
+                  <input 
+                    type="text"
+                    className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                    value={platformSettings.hero_title || ''}
+                    onChange={(e) => setPlatformSettings({ ...platformSettings, hero_title: e.target.value })}
+                    onBlur={() => updateSetting('hero_title', platformSettings.hero_title)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Subtítulo Hero</label>
+                  <textarea 
+                    className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none h-24"
+                    value={platformSettings.hero_subtitle || ''}
+                    onChange={(e) => setPlatformSettings({ ...platformSettings, hero_subtitle: e.target.value })}
+                    onBlur={() => updateSetting('hero_subtitle', platformSettings.hero_subtitle)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Texto do Rodapé</label>
+                  <input 
+                    type="text"
+                    className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                    value={platformSettings.footer_text || ''}
+                    onChange={(e) => setPlatformSettings({ ...platformSettings, footer_text: e.target.value })}
+                    onBlur={() => updateSetting('footer_text', platformSettings.footer_text)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Visual Identity */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 space-y-6">
+              <h2 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
+                <Palette className="text-emerald-600 w-5 h-5" />
+                Identidade Visual
+              </h2>
+
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Cor Principal</label>
+                  <div className="flex items-center gap-4">
+                    <input 
+                      type="color"
+                      className="w-12 h-12 rounded-lg cursor-pointer border-none"
+                      value={platformSettings.primary_color || '#059669'}
+                      onChange={(e) => setPlatformSettings({ ...platformSettings, primary_color: e.target.value })}
+                      onBlur={() => updateSetting('primary_color', platformSettings.primary_color)}
+                    />
+                    <input 
+                      type="text"
+                      className="flex-1 px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-mono"
+                      value={platformSettings.primary_color || '#059669'}
+                      onChange={(e) => setPlatformSettings({ ...platformSettings, primary_color: e.target.value })}
+                      onBlur={() => updateSetting('primary_color', platformSettings.primary_color)}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Logo</label>
+                    <div className="space-y-4">
+                      {platformSettings.platform_logo && (
+                        <img src={platformSettings.platform_logo} alt="Logo" className="h-12 object-contain bg-slate-50 p-2 rounded-lg border border-slate-100" />
+                      )}
+                      <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-200 rounded-2xl cursor-pointer hover:bg-slate-50 transition-colors">
+                        <Upload className="w-6 h-6 text-slate-400" />
+                        <span className="text-xs text-slate-500 mt-2">Upload Logo</span>
+                        <input type="file" className="hidden" onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], 'logo')} />
+                      </label>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Favicon</label>
+                    <div className="space-y-4">
+                      {platformSettings.platform_favicon && (
+                        <img src={platformSettings.platform_favicon} alt="Favicon" className="w-8 h-8 object-contain bg-slate-50 p-1 rounded-lg border border-slate-100" />
+                      )}
+                      <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-200 rounded-2xl cursor-pointer hover:bg-slate-50 transition-colors">
+                        <Upload className="w-6 h-6 text-slate-400" />
+                        <span className="text-xs text-slate-500 mt-2">Upload Favicon</span>
+                        <input type="file" className="hidden" onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], 'favicon')} />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Banners */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 space-y-6">
+            <div className="flex justify-between items-center">
+              <h2 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
+                <ImageIcon className="text-emerald-600 w-5 h-5" />
+                Banners do Carrossel (Home)
+              </h2>
+              <label className="bg-emerald-600 text-white px-4 py-2 rounded-xl hover:bg-emerald-700 transition-colors font-medium flex items-center gap-2 cursor-pointer">
+                <Plus className="w-4 h-4" />
+                Adicionar Banner
+                <input type="file" className="hidden" onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], 'banner')} />
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {banners.map((banner) => (
+                <div key={banner.id} className="relative group aspect-video rounded-xl overflow-hidden border border-slate-200">
+                  <img src={banner.url} alt="Banner" className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <button 
+                      onClick={() => deleteBanner(banner.id)}
+                      className="p-2 bg-white text-red-600 rounded-full hover:bg-red-50 transition-colors"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {banners.length === 0 && (
+                <div className="col-span-full py-12 text-center border-2 border-dashed border-slate-100 rounded-2xl">
+                  <ImageIcon className="w-12 h-12 text-slate-200 mx-auto mb-2" />
+                  <p className="text-slate-400">Nenhum banner cadastrado</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
