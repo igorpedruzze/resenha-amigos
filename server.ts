@@ -992,6 +992,61 @@ async function startServer() {
     });
   });
 
+  app.post("/api/auth/register-organizer", (req, res) => {
+    const { name, email, password, organizationName } = req.body;
+    try {
+      // 1. Create Organization
+      const slug = organizationName.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^\w-]+/g, '');
+      const orgResult = db.prepare("INSERT INTO organizations (nome, slug) VALUES (?, ?)").run(organizationName, slug);
+      const orgId = orgResult.lastInsertRowid;
+
+      // 2. Create Admin User
+      const salt = bcrypt.genSaltSync(10);
+      const hash = bcrypt.hashSync(password, salt);
+      const userResult = db.prepare(`
+        INSERT INTO usuarios (organization_id, nome, email, senha_hash, role, is_master, status)
+        VALUES (?, ?, ?, ?, 'admin', 1, 'ativo')
+      `).run(orgId, name, email, hash);
+      const userId = userResult.lastInsertRowid;
+
+      // 3. Create Default Event
+      db.prepare(`
+        INSERT INTO eventos (
+          organization_id, nome, valor_por_pessoa, ativo,
+          tpl_welcome, tpl_approval_guest, tpl_approval_companion, 
+          tpl_payment_confirm, tpl_password_recovery
+        ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)
+      `).run(
+        orgId,
+        "Meu Primeiro Evento",
+        100.00,
+        "Fala {nome}! Recebi seu cadastro para o meu evento. Vou dar uma olhada aqui e já te libero!",
+        "Tudo certo! Você está confirmado no meu evento. Use o ID {id} para entrar. Acesse seu painel em: {link}",
+        "Olá {nome}, seu acompanhante foi aprovado para o meu evento!",
+        "Olá {nome}, confirmamos o recebimento do seu pagamento no valor de R$ {valor}. Valeu!",
+        "Olá {nome}, para recuperar sua senha acesse o link: {link}"
+      );
+
+      const user = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(userId) as any;
+      
+      // Set session
+      (req.session as any).userId = user.id;
+      (req.session as any).userRole = user.role;
+      (req.session as any).organizationId = user.organization_id;
+      (req.session as any).isSuperAdmin = !!user.is_super_admin;
+
+      res.json(user);
+    } catch (error: any) {
+      if (error.message.includes('UNIQUE constraint failed')) {
+        if (error.message.includes('organizations.slug')) {
+          return res.status(400).json({ error: "Já existe uma organização com este nome ou slug similar." });
+        }
+        return res.status(400).json({ error: "Este e-mail já está cadastrado." });
+      }
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/auth/signup", (req, res) => {
     let { name, email, whatsapp, instagram, password, companionsCount, slug } = req.body;
     const orgSlug = slug || 'default';

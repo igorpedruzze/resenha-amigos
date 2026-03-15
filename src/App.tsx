@@ -50,6 +50,7 @@ import {
   Info,
   Send,
   Shield,
+  ShieldCheck,
   Wrench,
   Database,
   Download,
@@ -66,6 +67,7 @@ import {
 } from 'lucide-react';
 
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
+import SaaSLanding from './components/SaaSLanding';
 
 // Types
 interface UserData {
@@ -598,7 +600,7 @@ const CostsView = ({ costs, sales, onSaveCosts, onSaveSales, onPrint }: { costs:
 
 export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [view, setView] = useState<'signup' | 'login' | 'dashboard' | 'admin' | 'forgot-password' | 'reset-password' | 'superadmin'>('signup');
+  const [view, setView] = useState<'landing' | 'signup' | 'login' | 'dashboard' | 'admin' | 'forgot-password' | 'reset-password' | 'superadmin' | 'organizer-signup'>('landing');
   const [adminTab, setAdminTab] = useState<'stats' | 'validation' | 'guests' | 'messages_zap' | 'messages_email' | 'bulk_email' | 'costs' | 'settings' | 'logs' | 'maintenance'>('stats');
   const [backups, setBackups] = useState<any[]>([]);
   const [isGeneratingBackup, setIsGeneratingBackup] = useState(false);
@@ -740,6 +742,13 @@ export default function App() {
     confirmPassword: '',
     companionsCount: 0
   });
+  const [organizerSignupData, setOrganizerSignupData] = useState({
+    name: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+    organizationName: ''
+  });
   const [loginData, setLoginData] = useState({
     email: '',
     password: ''
@@ -759,7 +768,15 @@ export default function App() {
         const data = await res.json();
         setUser(data);
         if (data.role === 'admin') setView('admin');
+        else if (data.is_super_admin) setView('superadmin');
         else setView('dashboard');
+      } else {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('org')) {
+          setView('signup');
+        } else {
+          setView('landing');
+        }
       }
     } catch (error) {
       console.error('Error fetching me:', error);
@@ -1334,6 +1351,36 @@ export default function App() {
       }
     } catch (error) {
       setAuthError("Erro ao redefinir senha.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOrganizerSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (organizerSignupData.password !== organizerSignupData.confirmPassword) {
+      showToast('As senhas não coincidem', 'error');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/register-organizer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(organizerSignupData)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data);
+        setView('admin');
+        setAdminTab('settings');
+        showToast('Conta criada com sucesso! Configure seu primeiro evento.');
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Erro ao criar conta', 'error');
+      }
+    } catch (error) {
+      showToast('Erro de conexão', 'error');
     } finally {
       setLoading(false);
     }
@@ -2043,6 +2090,124 @@ export default function App() {
     );
   }
 
+  if (view === 'landing') {
+    return <SaaSLanding onStart={() => setView('organizer-signup')} onLogin={() => setView('login')} />;
+  }
+
+  if (view === 'organizer-signup') {
+    return (
+      <div className="min-h-screen bg-slate-50 font-sans flex items-center justify-center p-6">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="max-w-md w-full bg-white p-8 rounded-[2.5rem] shadow-2xl border border-slate-100"
+        >
+          <div className="flex items-center gap-2 text-blue-600 mb-8 justify-center">
+            <ShieldCheck className="size-8" />
+            <span className="text-xl font-black tracking-tighter text-slate-900 uppercase">EventMaster</span>
+          </div>
+          
+          <h1 className="text-2xl font-black text-slate-900 text-center mb-2">Crie sua Organização</h1>
+          <p className="text-slate-500 text-center text-sm mb-8">Comece a gerenciar seus eventos hoje mesmo.</p>
+
+          <form onSubmit={handleOrganizerSignup} className="space-y-4">
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Nome da Organização</label>
+              <div className="relative">
+                <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
+                <input 
+                  type="text" 
+                  required
+                  className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                  placeholder="Ex: Minha Empresa de Eventos"
+                  value={organizerSignupData.organizationName}
+                  onChange={e => setOrganizerSignupData({...organizerSignupData, organizationName: e.target.value})}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Seu Nome</label>
+              <div className="relative">
+                <User className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
+                <input 
+                  type="text" 
+                  required
+                  className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                  placeholder="Seu nome completo"
+                  value={organizerSignupData.name}
+                  onChange={e => setOrganizerSignupData({...organizerSignupData, name: e.target.value})}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">E-mail Profissional</label>
+              <div className="relative">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
+                <input 
+                  type="email" 
+                  required
+                  className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                  placeholder="seu@email.com"
+                  value={organizerSignupData.email}
+                  onChange={e => setOrganizerSignupData({...organizerSignupData, email: e.target.value})}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Senha</label>
+                <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
+                  <input 
+                    type="password" 
+                    required
+                    className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                    placeholder="••••••"
+                    value={organizerSignupData.password}
+                    onChange={e => setOrganizerSignupData({...organizerSignupData, password: e.target.value})}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Confirmar</label>
+                <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
+                  <input 
+                    type="password" 
+                    required
+                    className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl text-sm font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                    placeholder="••••••"
+                    value={organizerSignupData.confirmPassword}
+                    onChange={e => setOrganizerSignupData({...organizerSignupData, confirmPassword: e.target.value})}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <button 
+              type="submit"
+              disabled={loading}
+              className="w-full py-5 bg-blue-600 text-white font-black rounded-2xl hover:bg-blue-700 transition-all shadow-xl shadow-blue-200 flex items-center justify-center gap-3 disabled:opacity-50"
+            >
+              {loading ? 'Criando...' : 'Criar Minha Conta'}
+              <ArrowRight className="size-5" />
+            </button>
+          </form>
+
+          <button 
+            onClick={() => setView('landing')}
+            className="w-full mt-6 text-xs font-black text-slate-400 uppercase tracking-widest hover:text-blue-600 transition-colors"
+          >
+            Voltar para a Home
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
   if (view === 'signup' || view === 'login' || view === 'forgot-password' || view === 'reset-password') {
     return (
       <div className="min-h-screen bg-white font-sans flex flex-col">
@@ -2403,6 +2568,16 @@ export default function App() {
                     <ArrowRight className="size-5" />
                   </button>
                 </form>
+              )}
+
+              {!new URLSearchParams(window.location.search).has('org') && (
+                <button 
+                  type="button"
+                  onClick={() => setView('landing')}
+                  className="w-full mt-8 text-[10px] font-black text-slate-300 hover:text-blue-600 transition-colors uppercase tracking-widest"
+                >
+                  Voltar para a Home
+                </button>
               )}
             </div>
           </div>
