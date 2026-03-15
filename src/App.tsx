@@ -65,6 +65,8 @@ import {
   MoreVertical,
   Ban
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
 import SaaSLanding from './components/SaaSLanding';
@@ -1305,13 +1307,24 @@ export default function App() {
   const handleExportGuests = () => {
     if (!adminStats || !adminStats.guests) return;
     
-    const headers = ['ID', 'Nome', 'WhatsApp', 'Email', 'Status Pagamento', 'Valor Total', 'Valor Pago', 'Acompanhantes'];
+    const doc = new jsPDF();
+    
+    // Add title
+    doc.setFontSize(18);
+    doc.text('Relatório de Convidados', 14, 22);
+    doc.setFontSize(11);
+    doc.setTextColor(100);
+    
+    // Add date
+    const dateStr = new Date().toLocaleDateString('pt-BR');
+    doc.text(`Gerado em: ${dateStr}`, 14, 30);
+    
+    const headers = [['ID', 'Nome', 'WhatsApp', 'Email', 'Status', 'Total', 'Pago']];
     const rows = adminStats.guests.map(g => {
       const baseTotalDue = g.valor_total !== undefined && g.valor_total !== null ? g.valor_total : (adminStats.eventValue || 500);
       const totalDue = g.rsvp_status === 'desistente' ? 0 : baseTotalDue;
       const paid = g.paid || 0;
       const status = paid >= totalDue ? 'QUITADO' : paid > 0 ? 'PARCIAL' : 'PENDENTE';
-      const companions = g.companions ? g.companions.map((c: any) => c.nome).join('; ') : '';
       
       return [
         g.codigo_convidado || g.id,
@@ -1319,26 +1332,30 @@ export default function App() {
         g.whatsapp || '',
         g.email,
         status,
-        totalDue,
-        paid,
-        companions
+        `R$ ${totalDue.toFixed(2)}`,
+        `R$ ${paid.toFixed(2)}`
       ];
     });
 
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
-    ].join('\n');
+    autoTable(doc, {
+      head: headers,
+      body: rows,
+      startY: 35,
+      theme: 'striped',
+      headStyles: { fillColor: [79, 70, 229] }, // Indigo-600
+      styles: { fontSize: 8 },
+      columnStyles: {
+        0: { cellWidth: 20 },
+        1: { cellWidth: 40 },
+        2: { cellWidth: 30 },
+        3: { cellWidth: 40 },
+        4: { cellWidth: 20 },
+        5: { cellWidth: 20 },
+        6: { cellWidth: 20 },
+      }
+    });
 
-    const blob = new Blob(["\ufeff" + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `relatorio_convidados_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    doc.save(`relatorio_convidados_${new Date().toISOString().split('T')[0]}.pdf`);
     showToast('Relatório exportado com sucesso!');
   };
 
