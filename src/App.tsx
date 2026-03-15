@@ -22,6 +22,7 @@ import {
   CheckCircle, 
   TrendingUp, 
   ShoppingBag,
+  Building2,
   Users, 
   UserPlus,
   Filter, 
@@ -64,6 +65,8 @@ import {
   Ban
 } from 'lucide-react';
 
+import SuperAdminDashboard from './pages/SuperAdminDashboard';
+
 // Types
 interface UserData {
   id: number;
@@ -74,6 +77,7 @@ interface UserData {
   instagram: string;
   role: 'admin' | 'guest';
   is_master?: number;
+  is_super_admin?: number;
   valor_total?: number;
   codigo_convidado?: string;
   status?: 'ativo' | 'pendente' | 'recusado';
@@ -594,7 +598,7 @@ const CostsView = ({ costs, sales, onSaveCosts, onSaveSales, onPrint }: { costs:
 
 export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [view, setView] = useState<'signup' | 'login' | 'dashboard' | 'admin' | 'forgot-password' | 'reset-password'>('signup');
+  const [view, setView] = useState<'signup' | 'login' | 'dashboard' | 'admin' | 'forgot-password' | 'reset-password' | 'superadmin'>('signup');
   const [adminTab, setAdminTab] = useState<'stats' | 'validation' | 'guests' | 'messages_zap' | 'messages_email' | 'bulk_email' | 'costs' | 'settings' | 'logs' | 'maintenance'>('stats');
   const [backups, setBackups] = useState<any[]>([]);
   const [isGeneratingBackup, setIsGeneratingBackup] = useState(false);
@@ -2445,6 +2449,15 @@ export default function App() {
             <h2 className="text-slate-900 text-sm md:text-lg font-bold truncate">{publicEvent?.nome || 'Evento'}</h2>
           </div>
           <div className="flex items-center gap-2 md:gap-4">
+            {user.is_super_admin === 1 && (
+              <button 
+                onClick={() => setView('superadmin')}
+                className="p-2 rounded-lg bg-emerald-100 text-emerald-600 hover:bg-emerald-200 transition-all"
+                title="Dono da Plataforma"
+              >
+                <Shield className="size-4 md:size-5" />
+              </button>
+            )}
             <button className="p-2 rounded-lg bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-600 transition-all">
               <Bell className="size-4 md:size-5" />
             </button>
@@ -3060,6 +3073,72 @@ export default function App() {
     );
   }
 
+  if (view === 'superadmin' && user) {
+    return (
+      <div className="min-h-screen bg-slate-50 font-sans flex overflow-hidden">
+        <AnimatePresence>
+          {toast && (
+            <motion.div
+              initial={{ opacity: 0, y: 50, x: '-50%' }}
+              animate={{ opacity: 1, y: 0, x: '-50%' }}
+              exit={{ opacity: 0, y: 20, x: '-50%' }}
+              className={`fixed bottom-8 left-1/2 z-[200] px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border ${
+                toast.type === 'success' 
+                  ? 'bg-emerald-500 text-white border-emerald-400' 
+                  : 'bg-red-500 text-white border-red-400'
+              }`}
+            >
+              {toast.type === 'success' ? <CheckCircle className="size-5" /> : <XCircle className="size-5" />}
+              <span className="font-bold text-sm tracking-tight">{toast.message}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        
+        <aside className={`fixed inset-y-0 left-0 z-[100] w-72 bg-slate-900 flex flex-col h-full shadow-2xl transition-transform duration-300 md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+          <div className="p-6 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="bg-emerald-500 p-2 rounded-lg">
+                <Shield className="text-white size-8" />
+              </div>
+              <div>
+                <h1 className="text-white text-lg font-bold leading-none">SaaS Admin</h1>
+                <p className="text-white/60 text-[10px] font-medium uppercase tracking-wider mt-1">Dono da Plataforma</p>
+              </div>
+            </div>
+          </div>
+          
+          <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">
+            <button 
+              onClick={() => setView('superadmin')}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-white/10 text-white font-medium transition-all"
+            >
+              <Building2 className="size-5" />
+              <span>Organizações</span>
+            </button>
+            <button 
+              onClick={() => setView('admin')}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-white/70 hover:bg-white/5 hover:text-white transition-all"
+            >
+              <ArrowRight className="size-5" />
+              <span>Voltar ao CRM</span>
+            </button>
+          </nav>
+
+          <div className="p-6">
+            <button onClick={handleLogout} className="w-full py-3 bg-red-500/10 hover:bg-red-500/20 text-red-500 text-sm font-bold rounded-xl transition-colors flex items-center justify-center gap-2">
+              <LogOut className="size-4" />
+              Sair da Plataforma
+            </button>
+          </div>
+        </aside>
+
+        <main className="flex-1 flex flex-col overflow-y-auto">
+          <SuperAdminDashboard />
+        </main>
+      </div>
+    );
+  }
+
   if (view === 'admin' && user && adminStats) {
     return (
       <div className="min-h-screen bg-slate-50 font-sans flex overflow-hidden">
@@ -3177,6 +3256,15 @@ export default function App() {
                   <Settings className="size-5" />
                   <span>Configurações</span>
                 </button>
+                {user.is_super_admin === 1 && (
+                  <button 
+                    onClick={() => { setView('superadmin'); setIsSidebarOpen(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-emerald-400 hover:bg-emerald-400/10 transition-all font-bold"
+                  >
+                    <Shield className="size-5" />
+                    <span>Dono da Plataforma</span>
+                  </button>
+                )}
               </>
             )}
           </nav>

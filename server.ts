@@ -309,6 +309,12 @@ async function startServer() {
     db.exec("ALTER TABLE usuarios ADD COLUMN is_master INTEGER DEFAULT 0");
   } catch (e) {}
   try {
+    db.exec("ALTER TABLE usuarios ADD COLUMN is_super_admin INTEGER DEFAULT 0");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE organizations ADD COLUMN status TEXT DEFAULT 'ativo'");
+  } catch (e) {}
+  try {
     db.exec("ALTER TABLE eventos ADD COLUMN admin2_email TEXT");
   } catch (e) {}
   try {
@@ -648,14 +654,18 @@ async function startServer() {
   if (!adminExists) {
     const salt = bcrypt.genSaltSync(10);
     const hash = bcrypt.hashSync("imp598", salt);
-    db.prepare("INSERT INTO usuarios (organization_id, nome, email, senha_hash, role, is_master) VALUES (?, ?, ?, ?, ?, ?)").run(
+    db.prepare("INSERT INTO usuarios (organization_id, nome, email, senha_hash, role, is_master, is_super_admin) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
       1,
       "Admin",
       "igorpedruzze@gmail.com",
       hash,
       "admin",
+      1,
       1
     );
+  } else {
+    // Ensure the main admin is super admin
+    db.prepare("UPDATE usuarios SET is_super_admin = 1 WHERE email = ?").run("igorpedruzze@gmail.com");
   }
 
   // Migration: Ensure all passwords are BCrypt
@@ -844,22 +854,46 @@ async function startServer() {
   const authMiddleware = (req: any, res: any, next: any) => {
     const userId = (req.session as any).userId;
     const orgId = (req.session as any).organizationId;
+    const isSuperAdmin = (req.session as any).isSuperAdmin;
     
     if (!userId || !orgId) {
       return res.status(401).json({ error: "Sessão expirada ou não autenticada. Por favor, faça login novamente." });
     }
 
+    // Check if organization is active (Super Admin can always access)
+    if (!isSuperAdmin) {
+      const org = db.prepare("SELECT status FROM organizations WHERE id = ?").get(orgId) as any;
+      if (!org || org.status !== 'ativo') {
+        return res.status(403).json({ error: "Esta organização está temporariamente desativada. Entre em contato com o suporte." });
+      }
+    }
+
     // Attach IDs to request for use in all subsequent database queries
     req.userId = userId;
     req.orgId = orgId;
+    req.isSuperAdmin = isSuperAdmin;
     next();
   };
 
   const adminMiddleware = (req: any, res: any, next: any) => {
     authMiddleware(req, res, () => {
-      if ((req.session as any).userRole !== 'admin') return res.status(403).json({ error: "Acesso negado" });
+      if ((req.session as any).userRole !== 'admin' && !(req.session as any).isSuperAdmin) {
+        return res.status(403).json({ error: "Acesso negado" });
+      }
       next();
     });
+  };
+
+  const superAdminMiddleware = (req: any, res: any, next: any) => {
+    const userId = (req.session as any).userId;
+    const isSuperAdmin = (req.session as any).isSuperAdmin;
+
+    if (!userId || !isSuperAdmin) {
+      return res.status(403).json({ error: "Acesso restrito ao Dono da Plataforma" });
+    }
+    
+    req.userId = userId;
+    next();
   };
 
   // Helper to get current active event
@@ -1178,6 +1212,14 @@ async function startServer() {
         // Ensure role is set
         if (!user.role) user.role = 'guest';
 
+        // Check if organization is active (Super Admin can always login)
+        if (!user.is_super_admin) {
+          const org = db.prepare("SELECT status FROM organizations WHERE id = ?").get(user.organization_id) as any;
+          if (!org || org.status !== 'ativo') {
+            return res.status(403).json({ error: "Esta organização está desativada. Entre em contato com o suporte." });
+          }
+        }
+
         if (user.role === 'guest') {
           const event = getActiveEvent(user.organization_id);
           if (event && event.ativo === 0) {
@@ -1195,6 +1237,7 @@ async function startServer() {
         (req.session as any).userId = user.id;
         (req.session as any).userRole = user.role;
         (req.session as any).organizationId = user.organization_id;
+        (req.session as any).isSuperAdmin = !!user.is_super_admin;
 
         res.json(user);
       } else {
@@ -2659,6 +2702,55 @@ async function startServer() {
       }
     } catch (error: any) {
       console.error("Send custom email error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Super Admin Routes
+  app.get("/api/superadmin/organizations", superAdminMiddleware, (req, res) => {
+    try {
+      const orgs = db.prepare(`
+        SELECT o.*, 
+        (SELECT COUNT(*) FROM eventos WHERE organization_id = o.id) as events_count,
+        (SELECT COUNT(*) FROM usuarios WHERE organization_id = o.id AND role = 'guest') as guests_count
+        FROM organizations o
+        ORDER BY o.data_criacao DESC
+      `).all();
+      res.json(orgs);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/superadmin/organizations/:id/toggle", superAdminMiddleware, (req, res) => {
+    const { id } = req.params;
+    try {
+      const org = db.prepare("SELECT status FROM organizations WHERE id = ?").get(id) as any;
+      if (!org) return res.status(404).json({ error: "Organização não encontrada" });
+
+      const newStatus = org.status === 'ativo' ? 'inativo' : 'ativo';
+      db.prepare("UPDATE organizations SET status = ? WHERE id = ?").run(newStatus, id);
+      
+      res.json({ success: true, newStatus });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/superadmin/stats", superAdminMiddleware, (req, res) => {
+    try {
+      const totalOrgs = db.prepare("SELECT COUNT(*) as count FROM organizations").get() as any;
+      const totalEvents = db.prepare("SELECT COUNT(*) as count FROM eventos").get() as any;
+      const totalGuests = db.prepare("SELECT COUNT(*) as count FROM usuarios WHERE role = 'guest'").get() as any;
+      const totalPayments = db.prepare("SELECT SUM(valor) as total FROM pagamentos WHERE status = 'concluido'").get() as any;
+
+      res.json({
+        totalOrganizations: totalOrgs.count,
+        totalEvents: totalEvents.count,
+        totalGuests: totalGuests.count,
+        totalRevenue: totalPayments.total || 0
+      });
+    } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
