@@ -123,60 +123,69 @@ async function startServer() {
   const dbDir = process.env.DB_PATH || path.join(__dirname, "data");
   const dbPath = path.join(dbDir, "eventpro.db");
   const db = new Database(dbPath);
+  
+  // Performance optimizations
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
+  db.pragma('busy_timeout = 5000');
+  db.pragma('temp_store = MEMORY');
+
   const SETTINGS_FILE = path.join(dbDir, "settings.json");
 
-  function saveSettingsBackup() {
+  function saveSettingsBackup(orgId: number) {
     try {
-      const event = db.prepare("SELECT * FROM eventos LIMIT 1").get() as any;
-      const admin = db.prepare("SELECT nome, email, whatsapp, senha_hash FROM usuarios WHERE is_master = 1 LIMIT 1").get() as any;
-      const templates = db.prepare("SELECT * FROM templates").all() as any[];
+      const event = db.prepare("SELECT * FROM eventos WHERE organization_id = ? LIMIT 1").get(orgId) as any;
+      const admin = db.prepare("SELECT nome, email, whatsapp, senha_hash FROM usuarios WHERE is_master = 1 AND organization_id = ? LIMIT 1").get(orgId) as any;
+      const templates = db.prepare("SELECT * FROM templates WHERE organization_id = ?").all(orgId) as any[];
       
       if (event && admin) {
         const backup = { event, admin, templates };
-        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(backup, null, 2));
-        console.log("Settings backup saved to settings.json (including templates)");
+        const orgSettingsFile = path.join(dbDir, `settings_${orgId}.json`);
+        fs.writeFileSync(orgSettingsFile, JSON.stringify(backup, null, 2));
+        console.log(`Settings backup saved to settings_${orgId}.json`);
       }
     } catch (e) {
-      console.error("Error saving settings backup:", e);
+      console.error(`Error saving settings backup for org ${orgId}:`, e);
     }
   }
 
-  function loadSettingsBackup() {
+  function loadSettingsBackup(orgId: number) {
     try {
-      if (fs.existsSync(SETTINGS_FILE)) {
-        const backup = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
-        console.log("Checking for settings recovery from backup...");
+      const orgSettingsFile = path.join(dbDir, `settings_${orgId}.json`);
+      if (fs.existsSync(orgSettingsFile)) {
+        const backup = JSON.parse(fs.readFileSync(orgSettingsFile, "utf-8"));
+        console.log(`Checking for settings recovery from backup for org ${orgId}...`);
         
-        const eventExists = db.prepare("SELECT * FROM eventos LIMIT 1").get();
+        const eventExists = db.prepare("SELECT * FROM eventos WHERE organization_id = ? LIMIT 1").get(orgId);
         if (!eventExists && backup.event) {
           const { id, ...eventData } = backup.event;
           const columns = Object.keys(eventData);
           const placeholders = columns.map(() => "?").join(", ");
           const values = Object.values(eventData);
           db.prepare(`INSERT INTO eventos (${columns.join(", ")}) VALUES (${placeholders})`).run(...values);
-          console.log("Event restored from backup.");
+          console.log(`Event restored from backup for org ${orgId}.`);
         }
 
-        const adminExists = db.prepare("SELECT * FROM usuarios WHERE role = 'admin'").get();
+        const adminExists = db.prepare("SELECT * FROM usuarios WHERE role = 'admin' AND organization_id = ?").get(orgId);
         if (!adminExists && backup.admin) {
           const { nome, email, whatsapp, senha_hash } = backup.admin;
-          db.prepare("INSERT INTO usuarios (nome, email, whatsapp, senha_hash, role) VALUES (?, ?, ?, ?, ?)").run(
-            nome, email, whatsapp, senha_hash, 'admin'
+          db.prepare("INSERT INTO usuarios (nome, email, whatsapp, senha_hash, role, organization_id) VALUES (?, ?, ?, ?, ?, ?)").run(
+            nome, email, whatsapp, senha_hash, 'admin', orgId
           );
-          console.log("Admin restored from backup.");
+          console.log(`Admin restored from backup for org ${orgId}.`);
         }
 
-        const templatesCount = db.prepare("SELECT COUNT(*) as count FROM templates").get() as any;
+        const templatesCount = db.prepare("SELECT COUNT(*) as count FROM templates WHERE organization_id = ?").get(orgId) as any;
         if (templatesCount.count === 0 && backup.templates && backup.templates.length > 0) {
-          const insert = db.prepare("INSERT INTO templates (tipo, conteudo) VALUES (?, ?)");
+          const insert = db.prepare("INSERT INTO templates (tipo, conteudo, organization_id) VALUES (?, ?, ?)");
           backup.templates.forEach((t: any) => {
-            insert.run(t.tipo, t.conteudo);
+            insert.run(t.tipo, t.conteudo, orgId);
           });
-          console.log(`${backup.templates.length} templates restored from backup.`);
+          console.log(`${backup.templates.length} templates restored from backup for org ${orgId}.`);
         }
       }
     } catch (e) {
-      console.error("Error loading settings backup:", e);
+      console.error(`Error loading settings backup for org ${orgId}:`, e);
     }
   }
 
@@ -311,10 +320,13 @@ async function startServer() {
   } catch (e) {}
 
   try {
-    // Ensure the first admin is master
-    const hasMaster = db.prepare("SELECT COUNT(*) as count FROM usuarios WHERE is_master = 1").get() as any;
-    if (hasMaster.count === 0) {
-      db.prepare("UPDATE usuarios SET is_master = 1 WHERE role = 'admin' AND id = (SELECT MIN(id) FROM usuarios WHERE role = 'admin')").run();
+    // Ensure each organization has at least one master admin
+    const orgs = db.prepare("SELECT id FROM organizations").all() as any[];
+    for (const org of orgs) {
+      const hasMaster = db.prepare("SELECT COUNT(*) as count FROM usuarios WHERE is_master = 1 AND organization_id = ?").get(org.id) as any;
+      if (hasMaster.count === 0) {
+        db.prepare("UPDATE usuarios SET is_master = 1 WHERE role = 'admin' AND organization_id = ? AND id = (SELECT MIN(id) FROM usuarios WHERE role = 'admin' AND organization_id = ?)").run(org.id, org.id);
+      }
     }
   } catch (e) {}
 
@@ -581,42 +593,47 @@ async function startServer() {
     { tipo: 'email_password_recovery', conteudo: 'Olá {nome}, você solicitou a recuperação de senha. Clique no link abaixo para redefinir:\n\n{link}' }
   ];
 
-  for (const t of defaultTemplates) {
-    const exists = db.prepare("SELECT * FROM templates WHERE tipo = ?").get(t.tipo);
-    if (!exists) {
-      db.prepare("INSERT INTO templates (tipo, conteudo) VALUES (?, ?)").run(t.tipo, t.conteudo);
+  // Seed Initial Templates for each organization
+  const orgsForTemplates = db.prepare("SELECT id FROM organizations").all() as any[];
+  for (const org of orgsForTemplates) {
+    for (const t of defaultTemplates) {
+      const exists = db.prepare("SELECT * FROM templates WHERE organization_id = ? AND tipo = ?").get(org.id, t.tipo);
+      if (!exists) {
+        db.prepare("INSERT INTO templates (organization_id, tipo, conteudo) VALUES (?, ?, ?)").run(org.id, t.tipo, t.conteudo);
+      }
     }
-  }
 
-  // Migration: Move email templates from eventos to templates table if they exist
-  const currentEvent = db.prepare("SELECT * FROM eventos LIMIT 1").get() as any;
-  if (currentEvent) {
-    const migrations = [
-      { col: 'tpl_welcome', tipo: 'email_welcome' },
-      { col: 'tpl_approval_guest', tipo: 'email_approval_guest' },
-      { col: 'tpl_approval_companion', tipo: 'email_approval_companion' },
-      { col: 'tpl_payment_confirm', tipo: 'email_payment_confirm' },
-      { col: 'tpl_password_recovery', tipo: 'email_password_recovery' }
-    ];
-    for (const m of migrations) {
-      if (currentEvent[m.col]) {
-        db.prepare("UPDATE templates SET conteudo = ? WHERE tipo = ?").run(currentEvent[m.col], m.tipo);
+    // Migration: Move email templates from eventos to templates table if they exist for this org
+    const event = db.prepare("SELECT * FROM eventos WHERE organization_id = ? LIMIT 1").get(org.id) as any;
+    if (event) {
+      const migrations = [
+        { col: 'tpl_welcome', tipo: 'email_welcome' },
+        { col: 'tpl_approval_guest', tipo: 'email_approval_guest' },
+        { col: 'tpl_approval_companion', tipo: 'email_approval_companion' },
+        { col: 'tpl_payment_confirm', tipo: 'email_payment_confirm' },
+        { col: 'tpl_password_recovery', tipo: 'email_password_recovery' }
+      ];
+      for (const m of migrations) {
+        if (event[m.col]) {
+          db.prepare("UPDATE templates SET conteudo = ? WHERE organization_id = ? AND tipo = ?").run(event[m.col], org.id, m.tipo);
+        }
       }
     }
   }
 
-  // Seed Initial Event and Admin
-  loadSettingsBackup();
+  // Seed Initial Event and Admin for default organization
+  loadSettingsBackup(1);
 
-  const eventExists = db.prepare("SELECT * FROM eventos LIMIT 1").get();
+  const eventExists = db.prepare("SELECT * FROM eventos WHERE organization_id = 1 LIMIT 1").get();
   if (!eventExists) {
     db.prepare(`
       INSERT INTO eventos (
-        nome, valor_por_pessoa, 
+        organization_id, nome, valor_por_pessoa, 
         tpl_welcome, tpl_approval_guest, tpl_approval_companion, 
         tpl_payment_confirm, tpl_password_recovery
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
+      1,
       "Minha Resenha de Aniversário",
       500.00,
       "Fala {nome}! Recebi seu cadastro para o meu niver. Vou dar uma olhada aqui e já te libero!",
@@ -627,15 +644,17 @@ async function startServer() {
     );
   }
 
-  const adminExists = db.prepare("SELECT * FROM usuarios WHERE role = 'admin'").get();
+  const adminExists = db.prepare("SELECT * FROM usuarios WHERE role = 'admin' AND organization_id = 1").get();
   if (!adminExists) {
     const salt = bcrypt.genSaltSync(10);
     const hash = bcrypt.hashSync("imp598", salt);
-    db.prepare("INSERT INTO usuarios (nome, email, senha_hash, role) VALUES (?, ?, ?, ?)").run(
+    db.prepare("INSERT INTO usuarios (organization_id, nome, email, senha_hash, role, is_master) VALUES (?, ?, ?, ?, ?, ?)").run(
+      1,
       "Admin",
       "igorpedruzze@gmail.com",
       hash,
-      "admin"
+      "admin",
+      1
     );
   }
 
@@ -653,10 +672,10 @@ async function startServer() {
   }
 
   // Email helper
-  async function sendEmail(to: string, subject: string, html: string) {
-    const event = db.prepare("SELECT * FROM eventos LIMIT 1").get() as any;
+  async function sendEmail(orgId: number, to: string, subject: string, html: string) {
+    const event = db.prepare("SELECT * FROM eventos WHERE organization_id = ? LIMIT 1").get(orgId) as any;
     if (!event) {
-      console.error("No event found in database, cannot send email.");
+      console.error(`No event found for organization ${orgId}, cannot send email.`);
       return false;
     }
 
@@ -821,11 +840,16 @@ async function startServer() {
   app.use('/uploads', noDirectoryListing, express.static(uploadDir));
   app.use('/perfil', noDirectoryListing, express.static(perfilDir));
 
-  // SaaS Middlewares
+  // SaaS Middlewares - Ensures total data isolation between organizations
   const authMiddleware = (req: any, res: any, next: any) => {
     const userId = (req.session as any).userId;
     const orgId = (req.session as any).organizationId;
-    if (!userId || !orgId) return res.status(401).json({ error: "Não autenticado" });
+    
+    if (!userId || !orgId) {
+      return res.status(401).json({ error: "Sessão expirada ou não autenticada. Por favor, faça login novamente." });
+    }
+
+    // Attach IDs to request for use in all subsequent database queries
     req.userId = userId;
     req.orgId = orgId;
     next();
@@ -1031,12 +1055,12 @@ async function startServer() {
           link: event.system_url || process.env.APP_URL || "http://localhost:3000",
           system_url: event.system_url || process.env.APP_URL || "http://localhost:3000"
         });
-        sendEmail(email, `Solicitação Recebida - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
+        sendEmail(org.id, email, `Solicitação Recebida - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
           if (success) addLog(org.id, user.id, user.nome, 'E-mail Enviado', `E-mail de boas-vindas enviado para ${email}.`);
         });
 
         // Notify Admin
-        const admin = db.prepare("SELECT email FROM usuarios WHERE is_master = 1 LIMIT 1").get() as any;
+        const admin = db.prepare("SELECT email FROM usuarios WHERE is_master = 1 AND organization_id = ? LIMIT 1").get(org.id) as any;
         if (admin && admin.email) {
           const adminContent = `
             <p>Olá Administrador,</p>
@@ -1049,7 +1073,7 @@ async function startServer() {
             </ul>
             <p>Acesse o painel para aprovar ou recusar este convidado.</p>
           `;
-          sendEmail(admin.email, `Novo Pré-Cadastro: ${name}`, emailTemplate(adminContent, event));
+          sendEmail(org.id, admin.email, `Novo Pré-Cadastro: ${name}`, emailTemplate(adminContent, event));
         }
       }
 
@@ -1094,7 +1118,7 @@ async function startServer() {
         evento: event.nome
       });
 
-      const success = await sendEmail(email, `Recuperação de Senha - ${event.nome}`, emailTemplate(emailContent, event));
+      const success = await sendEmail(user.organization_id, email, `Recuperação de Senha - ${event.nome}`, emailTemplate(emailContent, event));
       
       if (success) {
         addLog(user.organization_id, user.id, user.nome, 'Recuperação de Senha', `E-mail de recuperação enviado para ${email}.`);
@@ -1136,12 +1160,12 @@ async function startServer() {
     }
   });
 
-  app.get("/api/auth/me", (req, res) => {
-    const userId = (req.session as any).userId;
-    if (!userId) return res.status(401).json({ error: "Não autenticado" });
-
-    const user = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(userId) as any;
-    if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
+  app.get("/api/auth/me", authMiddleware, (req: any, res) => {
+    const userId = req.userId;
+    const orgId = req.orgId;
+    
+    const user = db.prepare("SELECT * FROM usuarios WHERE id = ? AND organization_id = ?").get(userId, orgId) as any;
+    if (!user) return res.status(404).json({ error: "Usuário não encontrado nesta organização" });
 
     res.json(user);
   });
@@ -1522,7 +1546,7 @@ async function startServer() {
           evento: event.nome,
           acompanhante: companion.nome
         });
-        sendEmail(guest.email, `Acompanhante Aprovado - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
+        sendEmail(orgId, guest.email, `Acompanhante Aprovado - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
           if (success) addLog(orgId, guest.id, guest.nome, 'E-mail Enviado', `E-mail de aprovação de acompanhante (${companion.nome}) enviado para ${guest.email}.`);
         });
       }
@@ -1698,37 +1722,7 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/admin/guests/:id", adminMiddleware, (req: any, res) => {
-    const id = Number(req.params.id);
-    const orgId = req.orgId;
-    console.log(`DELETE GUEST REQUEST: id=${id}`);
-    try {
-      const guest = db.prepare("SELECT nome FROM usuarios WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
-      if (!guest) {
-        console.log(`Guest not found: ${id}`);
-        return res.status(404).json({ error: "Convidado não encontrado" });
-      }
 
-      // Delete associated data
-      db.prepare("DELETE FROM pagamentos WHERE usuario_id = ? AND organization_id = ?").run(id, orgId);
-      db.prepare("DELETE FROM acompanhantes WHERE usuario_id = ? AND organization_id = ?").run(id, orgId);
-      db.prepare("DELETE FROM logs_atividades WHERE usuario_id = ? AND organization_id = ?").run(id, orgId);
-      const deleteInfo = db.prepare("DELETE FROM usuarios WHERE id = ? AND organization_id = ?").run(id, orgId);
-      console.log(`Delete result:`, deleteInfo);
-      
-      if (deleteInfo.changes === 0) {
-        return res.status(500).json({ error: "Falha ao excluir convidado do banco de dados." });
-      }
-
-      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
-      addLog(orgId, admin?.id || null, admin?.nome || 'Adm', 'Exclusão de Convidado', `Adm ${admin?.nome} excluiu o convidado ${guest?.nome}.`);
-      
-      res.json({ success: true });
-    } catch (error: any) {
-      console.error("Delete guest error:", error);
-      res.status(500).json({ error: "Erro interno ao excluir convidado: " + error.message });
-    }
-  });
 
   // Admin: Refund Payment
   app.post("/api/admin/guests/:id/refund", adminMiddleware, (req: any, res) => {
@@ -1821,7 +1815,7 @@ async function startServer() {
           saldo: balance.toFixed(2),
           evento: event.nome
         });
-        sendEmail(user.email, `Recibo de Pagamento - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
+        sendEmail(orgId, user.email, `Recibo de Pagamento - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
           if (success) addLog(orgId, user.id, user.nome, 'E-mail Enviado', `E-mail de recibo de pagamento (R$ ${amount}) enviado para ${user.email}.`);
         });
       }
@@ -1888,7 +1882,7 @@ async function startServer() {
           saldo: balance.toFixed(2),
           evento: event.nome
         });
-        sendEmail(payment.user_email, `Pagamento Confirmado - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
+        sendEmail(orgId, payment.user_email, `Pagamento Confirmado - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
           if (success) addLog(orgId, payment.usuario_id, payment.user_name, 'E-mail Enviado', `E-mail de confirmação de pagamento Pix (R$ ${payment.valor}) enviado para ${payment.user_email}.`);
         });
       }
@@ -2051,7 +2045,7 @@ async function startServer() {
           link: event.system_url || process.env.APP_URL || "http://localhost:3000",
           system_url: event.system_url || process.env.APP_URL || "http://localhost:3000"
         });
-        sendEmail(guest.email, `Cadastro Aprovado! - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
+        sendEmail(orgId, guest.email, `Cadastro Aprovado! - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
           if (success) addLog(orgId, guest.id, guest.nome, 'E-mail Enviado', `E-mail de aprovação enviado para ${guest.email}.`);
         });
       }
@@ -2453,7 +2447,7 @@ async function startServer() {
         `).run(organizador.nome, organizador.email, organizador.whatsapp, admin.id, orgId);
       })();
       
-      saveSettingsBackup();
+      saveSettingsBackup(orgId);
       addLog(orgId, admin.id, organizador.nome, 'Configuração', `Adm ${organizador.nome} atualizou as configurações do evento e/ou flyers.`);
       
       res.json({ success: true });
@@ -2652,7 +2646,7 @@ async function startServer() {
       // Format message with line breaks to HTML
       const formattedMessage = message.replace(/\n/g, '<br>');
       
-      const success = await sendEmail(email, subject, emailTemplate(formattedMessage, event));
+      const success = await sendEmail(orgId, email, subject, emailTemplate(formattedMessage, event));
       
       if (success) {
         if (userId) {
