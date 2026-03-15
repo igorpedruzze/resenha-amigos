@@ -243,6 +243,14 @@ async function startServer() {
       FOREIGN KEY (organization_id) REFERENCES organizations(id)
     );
 
+    CREATE TABLE IF NOT EXISTS platform_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+
+    -- Insert default support whatsapp if not exists
+    INSERT OR IGNORE INTO platform_settings (key, value) VALUES ('support_whatsapp', '28998847855');
+
     CREATE TABLE IF NOT EXISTS usuarios (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       organization_id INTEGER,
@@ -1294,7 +1302,12 @@ async function startServer() {
     const userId = req.userId;
     const orgId = req.orgId;
     
-    const user = db.prepare("SELECT * FROM usuarios WHERE id = ? AND organization_id = ?").get(userId, orgId) as any;
+    const user = db.prepare(`
+      SELECT u.*, o.nome as organization_name 
+      FROM usuarios u 
+      JOIN organizations o ON u.organization_id = o.id 
+      WHERE u.id = ? AND u.organization_id = ?
+    `).get(userId, orgId) as any;
     if (!user) return res.status(404).json({ error: "Usuário não encontrado nesta organização" });
 
     res.json(user);
@@ -2073,6 +2086,8 @@ async function startServer() {
       GROUP BY u.id
     `).all(orgId, event.id, orgId, orgId);
 
+    const supportWhatsapp = db.prepare("SELECT value FROM platform_settings WHERE key = 'support_whatsapp'").get() as any;
+
     res.json({
       totalArrecadado: totalArrecadado?.total || 0,
       totalVendasExtras: totalVendasExtras?.total || 0,
@@ -2084,6 +2099,7 @@ async function startServer() {
       custos,
       capacity: event.capacidade_maxima || 50,
       plan: orgPlan || null,
+      support_whatsapp: supportWhatsapp?.value || '28998847855',
       guests: guests.map((g: any) => {
         const companions = db.prepare("SELECT id, nome, instagram, status FROM acompanhantes WHERE usuario_id = ? AND organization_id = ?").all(g.id, orgId);
         return {
@@ -2847,6 +2863,26 @@ async function startServer() {
     try {
       const plans = db.prepare("SELECT * FROM plans ORDER BY price ASC").all();
       res.json(plans);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/superadmin/settings", superAdminMiddleware, (req, res) => {
+    try {
+      const settings = db.prepare("SELECT * FROM platform_settings").all() as any[];
+      const settingsMap = settings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {});
+      res.json(settingsMap);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/superadmin/settings", superAdminMiddleware, (req, res) => {
+    const { key, value } = req.body;
+    try {
+      db.prepare("INSERT OR REPLACE INTO platform_settings (key, value) VALUES (?, ?)").run(key, value);
+      res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

@@ -47,7 +47,9 @@ export default function SuperAdminDashboard() {
   const [stats, setStats] = useState<GlobalStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'orgs' | 'plans'>('orgs');
+  const [activeTab, setActiveTab] = useState<'orgs' | 'plans' | 'settings'>('orgs');
+  const [platformSettings, setPlatformSettings] = useState<Record<string, string>>({});
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   
   // Plan Modal State
   const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
@@ -60,19 +62,22 @@ export default function SuperAdminDashboard() {
 
   const fetchData = async () => {
     try {
-      const [orgsRes, statsRes, plansRes] = await Promise.all([
+      const [orgsRes, statsRes, plansRes, settingsRes] = await Promise.all([
         fetch('/api/superadmin/organizations'),
         fetch('/api/superadmin/stats'),
-        fetch('/api/superadmin/plans')
+        fetch('/api/superadmin/plans'),
+        fetch('/api/superadmin/settings')
       ]);
       
-      if (orgsRes.ok && statsRes.ok && plansRes.ok) {
+      if (orgsRes.ok && statsRes.ok && plansRes.ok && settingsRes.ok) {
         const orgsData = await orgsRes.json();
         const statsData = await statsRes.json();
         const plansData = await plansRes.json();
+        const settingsData = await settingsRes.json();
         setOrgs(orgsData);
         setStats(statsData);
         setPlans(plansData);
+        setPlatformSettings(settingsData);
       }
     } catch (error) {
       console.error('Error fetching superadmin data:', error);
@@ -152,6 +157,24 @@ export default function SuperAdminDashboard() {
     }
   };
 
+  const updateSetting = async (key: string, value: string) => {
+    setIsSavingSettings(true);
+    try {
+      const res = await fetch('/api/superadmin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value })
+      });
+      if (res.ok) {
+        setPlatformSettings(prev => ({ ...prev, [key]: value }));
+      }
+    } catch (error) {
+      console.error('Error updating setting:', error);
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
   const filteredOrgs = orgs.filter(org => 
     org.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
     org.slug.toLowerCase().includes(searchTerm.toLowerCase())
@@ -220,6 +243,13 @@ export default function SuperAdminDashboard() {
         >
           Planos de Assinatura
           {activeTab === 'plans' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600" />}
+        </button>
+        <button 
+          onClick={() => setActiveTab('settings')}
+          className={`pb-4 px-2 font-medium transition-colors relative ${activeTab === 'settings' ? 'text-emerald-600' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          Configurações
+          {activeTab === 'settings' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600" />}
         </button>
       </div>
 
@@ -329,7 +359,7 @@ export default function SuperAdminDashboard() {
             </table>
           </div>
         </div>
-      ) : (
+      ) : activeTab === 'plans' ? (
         <div className="space-y-6">
           <div className="flex justify-between items-center">
             <h2 className="text-xl font-semibold text-slate-800">Gestão de Planos</h2>
@@ -383,6 +413,36 @@ export default function SuperAdminDashboard() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 max-w-2xl">
+          <h2 className="text-xl font-semibold text-slate-800 mb-6">Configurações da Plataforma</h2>
+          <div className="space-y-6">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Número de WhatsApp de Suporte
+              </label>
+              <div className="flex gap-4">
+                <input 
+                  type="text"
+                  className="flex-1 px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                  value={platformSettings.support_whatsapp || ''}
+                  onChange={(e) => setPlatformSettings({ ...platformSettings, support_whatsapp: e.target.value })}
+                  placeholder="Ex: 28998847855"
+                />
+                <button 
+                  onClick={() => updateSetting('support_whatsapp', platformSettings.support_whatsapp)}
+                  disabled={isSavingSettings}
+                  className="bg-emerald-600 text-white px-6 py-2 rounded-xl hover:bg-emerald-700 transition-colors font-medium disabled:opacity-50"
+                >
+                  {isSavingSettings ? 'Salvando...' : 'Salvar'}
+                </button>
+              </div>
+              <p className="text-xs text-slate-500 mt-2">
+                Este número será usado para os botões de "Suporte / Upgrade" no painel dos organizadores.
+              </p>
+            </div>
           </div>
         </div>
       )}

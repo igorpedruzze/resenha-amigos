@@ -80,6 +80,7 @@ interface UserData {
   role: 'admin' | 'guest';
   is_master?: number;
   is_super_admin?: number;
+  organization_name?: string;
   valor_total?: number;
   codigo_convidado?: string;
   status?: 'ativo' | 'pendente' | 'recusado';
@@ -211,6 +212,7 @@ interface AdminStats {
     price: number;
     status: string;
   } | null;
+  support_whatsapp?: string;
 }
 
 interface ActivityLog {
@@ -3544,6 +3546,15 @@ export default function App() {
               </span>
             </div>
             <div className="flex items-center gap-2 md:gap-4">
+              <a 
+                href={`https://wa.me/${adminStats?.support_whatsapp || '28998847855'}?text=${encodeURIComponent(`Olá Igor, sou o organizador da ${user?.organization_name || 'minha organização'} e gostaria de solicitar um upgrade no meu plano atual.`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hidden md:flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-colors text-sm font-bold shadow-sm shadow-emerald-200"
+              >
+                <MessageCircle className="size-4" />
+                Suporte / Upgrade
+              </a>
               <button className={`p-2 rounded-lg relative transition-colors ${hasPendingActions ? 'text-red-500 bg-red-50' : 'text-slate-500 hover:bg-slate-100'}`}>
                 <Bell className="size-5" />
                 {hasPendingActions && (
