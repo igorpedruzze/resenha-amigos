@@ -182,8 +182,17 @@ async function startServer() {
 
   // Initialize Database with the manual validation schema
   db.exec(`
+    CREATE TABLE IF NOT EXISTS organizations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nome TEXT NOT NULL,
+      slug TEXT UNIQUE NOT NULL,
+      status TEXT DEFAULT 'ativo',
+      data_criacao DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS eventos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      organization_id INTEGER,
       nome TEXT NOT NULL,
       valor_por_pessoa REAL NOT NULL,
       pix_key TEXT,
@@ -211,11 +220,13 @@ async function startServer() {
       tpl_approval_guest TEXT,
       tpl_approval_companion TEXT,
       tpl_payment_confirm TEXT,
-      tpl_password_recovery TEXT
+      tpl_password_recovery TEXT,
+      FOREIGN KEY (organization_id) REFERENCES organizations(id)
     );
 
     CREATE TABLE IF NOT EXISTS usuarios (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      organization_id INTEGER,
       nome TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
       whatsapp TEXT,
@@ -228,12 +239,62 @@ async function startServer() {
       acompanhantes_count INTEGER DEFAULT 0,
       status TEXT DEFAULT 'ativo', -- 'ativo', 'pendente', 'recusado'
       rsvp_status TEXT, -- 'confirmado', 'desistente', 'lista_espera'
-      is_master INTEGER DEFAULT 0
+      is_master INTEGER DEFAULT 0,
+      foto_perfil TEXT,
+      reset_token TEXT,
+      reset_token_expires INTEGER,
+      FOREIGN KEY (organization_id) REFERENCES organizations(id)
     );
-
-    -- Migration: Ensure role column exists if table was created without it
-    PRAGMA table_info(usuarios);
   `);
+
+  // Migrations for SaaS Multi-tenancy
+  try {
+    db.exec("ALTER TABLE eventos ADD COLUMN organization_id INTEGER REFERENCES organizations(id)");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE usuarios ADD COLUMN organization_id INTEGER REFERENCES organizations(id)");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE pagamentos ADD COLUMN organization_id INTEGER REFERENCES organizations(id)");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE acompanhantes ADD COLUMN organization_id INTEGER REFERENCES organizations(id)");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE templates ADD COLUMN organization_id INTEGER REFERENCES organizations(id)");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE logs_atividades ADD COLUMN organization_id INTEGER REFERENCES organizations(id)");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE custos ADD COLUMN organization_id INTEGER REFERENCES organizations(id)");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE vendas_extras ADD COLUMN organization_id INTEGER REFERENCES organizations(id)");
+  } catch (e) {}
+  try {
+    db.exec("ALTER TABLE backups ADD COLUMN organization_id INTEGER REFERENCES organizations(id)");
+  } catch (e) {}
+
+  // Seed Default Organization if none exists
+  const hasOrg = db.prepare("SELECT COUNT(*) as count FROM organizations").get() as any;
+  if (hasOrg.count === 0) {
+    const result = db.prepare("INSERT INTO organizations (nome, slug) VALUES (?, ?)").run("Minha Organização", "default");
+    const defaultOrgId = result.lastInsertRowid;
+    
+    // Assign existing data to default organization
+    db.prepare("UPDATE eventos SET organization_id = ? WHERE organization_id IS NULL").run(defaultOrgId);
+    db.prepare("UPDATE usuarios SET organization_id = ? WHERE organization_id IS NULL").run(defaultOrgId);
+    db.prepare("UPDATE pagamentos SET organization_id = ? WHERE organization_id IS NULL").run(defaultOrgId);
+    db.prepare("UPDATE acompanhantes SET organization_id = ? WHERE organization_id IS NULL").run(defaultOrgId);
+    db.prepare("UPDATE templates SET organization_id = ? WHERE organization_id IS NULL").run(defaultOrgId);
+    db.prepare("UPDATE logs_atividades SET organization_id = ? WHERE organization_id IS NULL").run(defaultOrgId);
+    db.prepare("UPDATE custos SET organization_id = ? WHERE organization_id IS NULL").run(defaultOrgId);
+    db.prepare("UPDATE vendas_extras SET organization_id = ? WHERE organization_id IS NULL").run(defaultOrgId);
+    db.prepare("UPDATE backups SET organization_id = ? WHERE organization_id IS NULL").run(defaultOrgId);
+    
+    console.log("Default organization created and existing data migrated.");
+  }
 
   try {
     db.exec("ALTER TABLE usuarios ADD COLUMN is_master INTEGER DEFAULT 0");
@@ -409,6 +470,7 @@ async function startServer() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS pagamentos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      organization_id INTEGER,
       usuario_id INTEGER NOT NULL,
       evento_id INTEGER NOT NULL,
       valor REAL NOT NULL,
@@ -416,36 +478,45 @@ async function startServer() {
       status TEXT DEFAULT 'pendente', -- 'pendente', 'concluido', 'rejeitado'
       comprovante_url TEXT,
       observacao TEXT,
+      FOREIGN KEY (organization_id) REFERENCES organizations(id),
       FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
       FOREIGN KEY (evento_id) REFERENCES eventos(id)
     );
 
     CREATE TABLE IF NOT EXISTS acompanhantes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      organization_id INTEGER,
       usuario_id INTEGER NOT NULL,
       nome TEXT NOT NULL,
       instagram TEXT,
       status TEXT DEFAULT 'pendente_aprovacao', -- 'pendente_aprovacao', 'aprovado'
+      FOREIGN KEY (organization_id) REFERENCES organizations(id),
       FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
     );
 
     CREATE TABLE IF NOT EXISTS templates (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      tipo TEXT UNIQUE NOT NULL,
-      conteudo TEXT NOT NULL
+      organization_id INTEGER,
+      tipo TEXT NOT NULL,
+      conteudo TEXT NOT NULL,
+      FOREIGN KEY (organization_id) REFERENCES organizations(id),
+      UNIQUE(organization_id, tipo)
     );
 
     CREATE TABLE IF NOT EXISTS logs_atividades (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      organization_id INTEGER,
       data_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
       usuario_id INTEGER,
       usuario_nome TEXT,
       acao TEXT,
-      mensagem TEXT
+      mensagem TEXT,
+      FOREIGN KEY (organization_id) REFERENCES organizations(id)
     );
 
     CREATE TABLE IF NOT EXISTS custos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      organization_id INTEGER,
       evento_id INTEGER NOT NULL,
       descricao TEXT NOT NULL,
       quantidade REAL DEFAULT 1,
@@ -453,24 +524,29 @@ async function startServer() {
       valor_unitario REAL DEFAULT 0,
       total REAL DEFAULT 0,
       categoria TEXT,
+      FOREIGN KEY (organization_id) REFERENCES organizations(id),
       FOREIGN KEY (evento_id) REFERENCES eventos(id)
     );
 
     CREATE TABLE IF NOT EXISTS vendas_extras (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      organization_id INTEGER,
       evento_id INTEGER NOT NULL,
       descricao TEXT NOT NULL,
       valor REAL NOT NULL,
       data_venda DATETIME DEFAULT CURRENT_TIMESTAMP,
       categoria TEXT,
+      FOREIGN KEY (organization_id) REFERENCES organizations(id),
       FOREIGN KEY (evento_id) REFERENCES eventos(id)
     );
 
     CREATE TABLE IF NOT EXISTS backups (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      organization_id INTEGER,
       data_hora DATETIME DEFAULT CURRENT_TIMESTAMP,
       nome TEXT NOT NULL,
-      conteudo TEXT NOT NULL
+      conteudo TEXT NOT NULL,
+      FOREIGN KEY (organization_id) REFERENCES organizations(id)
     );
   `);
 
@@ -657,8 +733,8 @@ async function startServer() {
     }
   }
 
-  function getTemplate(tipo: string): string {
-    const template = db.prepare("SELECT conteudo FROM templates WHERE tipo = ?").get(tipo) as any;
+  function getTemplate(orgId: number, tipo: string): string {
+    const template = db.prepare("SELECT conteudo FROM templates WHERE organization_id = ? AND tipo = ?").get(orgId, tipo) as any;
     if (template && template.conteudo && template.conteudo.trim() !== "") {
       return template.conteudo;
     }
@@ -745,19 +821,36 @@ async function startServer() {
   app.use('/uploads', noDirectoryListing, express.static(uploadDir));
   app.use('/perfil', noDirectoryListing, express.static(perfilDir));
 
-  // Helper to get current active event
-  const getActiveEvent = () => db.prepare("SELECT * FROM eventos LIMIT 1").get() as any;
+  // SaaS Middlewares
+  const authMiddleware = (req: any, res: any, next: any) => {
+    const userId = (req.session as any).userId;
+    const orgId = (req.session as any).organizationId;
+    if (!userId || !orgId) return res.status(401).json({ error: "Não autenticado" });
+    req.userId = userId;
+    req.orgId = orgId;
+    next();
+  };
 
-  // Helper to get current real occupancy (Confirmed RSVP)
-  const getCurrentOccupancy = () => {
-    const confirmedGuests = db.prepare("SELECT COUNT(*) as count FROM usuarios WHERE role = 'guest' AND status = 'ativo' AND rsvp_status = 'confirmado'").get() as any;
-    const confirmedCompanions = db.prepare(`
+  const adminMiddleware = (req: any, res: any, next: any) => {
+    authMiddleware(req, res, () => {
+      if ((req.session as any).userRole !== 'admin') return res.status(403).json({ error: "Acesso negado" });
+      next();
+    });
+  };
+
+  // Helper to get current active event
+  const getActiveEvent = (orgId: number) => db.prepare("SELECT * FROM eventos WHERE organization_id = ? LIMIT 1").get(orgId) as any;
+
+  // Helper to get current real occupancy (All Active Guests + Approved Companions)
+  const getCurrentOccupancy = (orgId: number) => {
+    const activeGuests = db.prepare("SELECT COUNT(*) as count FROM usuarios WHERE organization_id = ? AND role = 'guest' AND status = 'ativo'").get(orgId) as any;
+    const activeCompanions = db.prepare(`
       SELECT COUNT(*) as count 
       FROM acompanhantes a
       JOIN usuarios u ON a.usuario_id = u.id
-      WHERE a.status = 'aprovado' AND u.rsvp_status = 'confirmado'
-    `).get() as any;
-    return (confirmedGuests.count || 0) + (confirmedCompanions.count || 0);
+      WHERE a.organization_id = ? AND a.status = 'aprovado' AND u.status = 'ativo'
+    `).get(orgId) as any;
+    return (activeGuests.count || 0) + (activeCompanions.count || 0);
   };
 
   // Helper to save base64 image to disk
@@ -794,7 +887,7 @@ async function startServer() {
     return code;
   }
 
-  function addLog(usuarioId: number | null, usuarioNome: string, acao: string, mensagem: string) {
+  function addLog(orgId: number, usuarioId: number | null, usuarioNome: string, acao: string, mensagem: string) {
     try {
       let finalNome = usuarioNome;
       if (usuarioId) {
@@ -803,7 +896,7 @@ async function startServer() {
           finalNome = `[ID: ${user.codigo_convidado}] ${usuarioNome}`;
         }
       }
-      db.prepare("INSERT INTO logs_atividades (usuario_id, usuario_nome, acao, mensagem) VALUES (?, ?, ?, ?)").run(usuarioId, finalNome, acao, mensagem);
+      db.prepare("INSERT INTO logs_atividades (organization_id, usuario_id, usuario_nome, acao, mensagem) VALUES (?, ?, ?, ?, ?)").run(orgId, usuarioId, finalNome, acao, mensagem);
       // Cleanup logs older than 30 days
       db.prepare("DELETE FROM logs_atividades WHERE data_hora < datetime('now', '-30 days')").run();
     } catch (error) {
@@ -814,10 +907,14 @@ async function startServer() {
   // API Routes
   // Public Event Info
   app.get("/api/public/event", (req, res) => {
-    const event = getActiveEvent();
+    const slug = req.query.slug as string || 'default';
+    const org = db.prepare("SELECT id FROM organizations WHERE slug = ?").get(slug) as any;
+    if (!org) return res.status(404).json({ error: "Organização não encontrada" });
+
+    const event = getActiveEvent(org.id);
     if (!event) return res.status(404).json({ error: "Evento não encontrado" });
     
-    const admin = db.prepare("SELECT foto_perfil, whatsapp FROM usuarios WHERE is_master = 1 LIMIT 1").get() as any;
+    const admin = db.prepare("SELECT foto_perfil, whatsapp FROM usuarios WHERE organization_id = ? AND is_master = 1 LIMIT 1").get(org.id) as any;
     
     res.json({
       nome: event.nome,
@@ -830,15 +927,18 @@ async function startServer() {
       limite_acompanhantes: event.limite_acompanhantes || 4,
       prazo_rsvp: event.prazo_rsvp,
       ativo: event.ativo,
-      admin_foto: admin?.foto_perfil || null,
-      admin_whatsapp: admin?.whatsapp || null,
+      ocupacao_atual: getCurrentOccupancy(org.id),
       capacidade_maxima: event.capacidade_maxima || 50,
-      ocupacao_atual: getCurrentOccupancy()
+      admin_foto: admin?.foto_perfil || null,
+      admin_whatsapp: admin?.whatsapp || null
     });
   });
 
   app.post("/api/auth/signup", (req, res) => {
-    let { name, email, whatsapp, instagram, password, companionsCount } = req.body;
+    let { name, email, whatsapp, instagram, password, companionsCount, slug } = req.body;
+    const orgSlug = slug || 'default';
+    const org = db.prepare("SELECT id FROM organizations WHERE slug = ?").get(orgSlug) as any;
+    if (!org) return res.status(404).json({ error: "Organização não encontrada" });
 
     name = sanitize(name);
     email = sanitize(email);
@@ -849,7 +949,7 @@ async function startServer() {
       return res.status(400).json({ error: "Nome, E-mail, WhatsApp e Senha são obrigatórios." });
     }
 
-    const event = getActiveEvent();
+    const event = getActiveEvent(org.id);
     if (event && event.ativo === 0) {
       return res.status(403).json({ error: "As inscrições para este evento estão encerradas ou o evento está inativo no momento." });
     }
@@ -862,7 +962,7 @@ async function startServer() {
     if (!event) return res.status(404).json({ error: "Evento não encontrado" });
 
     // Security: Validate capacity before signup
-    const currentOccupancy = getCurrentOccupancy();
+    const currentOccupancy = getCurrentOccupancy(org.id);
     if (currentOccupancy >= (event.capacidade_maxima || 50)) {
       return res.status(400).json({ error: "Vagas Esgotadas! 🚀 Infelizmente atingimos o limite máximo de convidados." });
     }
@@ -875,7 +975,7 @@ async function startServer() {
     }
 
     // Duplicity check
-    const existingUser = db.prepare("SELECT status FROM usuarios WHERE LOWER(email) = LOWER(?) OR (instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?))").get(email, instagram) as any;
+    const existingUser = db.prepare("SELECT status FROM usuarios WHERE organization_id = ? AND (LOWER(email) = LOWER(?) OR (instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?)))").get(org.id, email, instagram) as any;
     if (existingUser) {
       if (existingUser.status === 'ativo') {
         return res.status(400).json({ error: "Você já está na lista! Verifique seu e-mail." });
@@ -889,7 +989,7 @@ async function startServer() {
 
     // Check if instagram exists in acompanhantes table
     if (instagram) {
-      const existingCompanion = db.prepare("SELECT id FROM acompanhantes WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?)").get(instagram);
+      const existingCompanion = db.prepare("SELECT id FROM acompanhantes WHERE organization_id = ? AND instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?)").get(org.id, instagram);
       if (existingCompanion) {
         return res.status(400).json({ error: "Este perfil já está registrado como acompanhante de outro convidado." });
       }
@@ -911,16 +1011,16 @@ async function startServer() {
       const salt = bcrypt.genSaltSync(10);
       const hash = bcrypt.hashSync(password, salt);
       const result = db.prepare(
-        "INSERT INTO usuarios (nome, email, whatsapp, instagram, senha_hash, role, valor_total, status, codigo_convidado, acompanhantes_count) VALUES (?, ?, ?, ?, ?, 'guest', ?, 'pendente', ?, ?)"
-      ).run(name, email, whatsapp, instagram, hash, defaultValue, guestCode, count);
+        "INSERT INTO usuarios (organization_id, nome, email, whatsapp, instagram, senha_hash, role, valor_total, status, codigo_convidado, acompanhantes_count) VALUES (?, ?, ?, ?, ?, ?, 'guest', ?, 'pendente', ?, ?)"
+      ).run(org.id, name, email, whatsapp, instagram, hash, defaultValue, guestCode, count);
       
       const user = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(result.lastInsertRowid) as any;
       if (user && !user.role) user.role = 'guest';
-      addLog(user.id, user.nome, 'Solicitação de Cadastro', `Convidado ${user.nome} solicitou cadastro e aguarda aprovação. ID: ${user.id}`);
+      addLog(org.id, user.id, user.nome, 'Solicitação de Cadastro', `Convidado ${user.nome} solicitou cadastro e aguarda aprovação. ID: ${user.id}`);
       
       // Email Trigger: Signup
       if (event && email) {
-        const template = getTemplate('email_welcome');
+        const template = getTemplate(org.id, 'email_welcome');
         const emailContent = parseTemplate(template, {
           tipo: 'email_welcome',
           nome: name,
@@ -932,7 +1032,7 @@ async function startServer() {
           system_url: event.system_url || process.env.APP_URL || "http://localhost:3000"
         });
         sendEmail(email, `Solicitação Recebida - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
-          if (success) addLog(user.id, user.nome, 'E-mail Enviado', `E-mail de boas-vindas enviado para ${email}.`);
+          if (success) addLog(org.id, user.id, user.nome, 'E-mail Enviado', `E-mail de boas-vindas enviado para ${email}.`);
         });
 
         // Notify Admin
@@ -964,16 +1064,15 @@ async function startServer() {
 
   app.post("/api/auth/forgot-password", async (req, res) => {
     const { email } = req.body;
-    const event = getActiveEvent();
-    if (!event) return res.status(404).json({ error: "Evento não encontrado" });
-
     try {
       const user = db.prepare("SELECT * FROM usuarios WHERE LOWER(email) = LOWER(?)").get(email) as any;
       
       if (!user) {
-        // For security, don't reveal if email exists, but the requirement says "verificar se o e-mail existe"
         return res.status(404).json({ error: "E-mail não encontrado em nossa base." });
       }
+
+      const event = getActiveEvent(user.organization_id);
+      if (!event) return res.status(404).json({ error: "Evento não encontrado" });
 
       if (user.role === 'guest' && user.status !== 'ativo') {
         return res.status(403).json({ error: "Sua conta ainda não foi aprovada pelo organizador." });
@@ -987,7 +1086,7 @@ async function startServer() {
       const baseUrl = event.system_url || process.env.APP_URL || 'http://localhost:3000';
       const resetLink = `${baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl}/reset-password?token=${token}`;
       
-      const template = getTemplate('email_password_recovery');
+      const template = getTemplate(user.organization_id, 'email_password_recovery');
       const emailContent = parseTemplate(template, {
         tipo: 'email_password_recovery',
         nome: user.nome,
@@ -998,7 +1097,7 @@ async function startServer() {
       const success = await sendEmail(email, `Recuperação de Senha - ${event.nome}`, emailTemplate(emailContent, event));
       
       if (success) {
-        addLog(user.id, user.nome, 'Recuperação de Senha', `E-mail de recuperação enviado para ${email}.`);
+        addLog(user.organization_id, user.id, user.nome, 'Recuperação de Senha', `E-mail de recuperação enviado para ${email}.`);
         res.json({ success: true, message: "E-mail de recuperação enviado com sucesso!" });
       } else {
         res.status(500).json({ error: "Erro ao enviar e-mail. Verifique as configurações de SMTP." });
@@ -1029,7 +1128,7 @@ async function startServer() {
       const hash = bcrypt.hashSync(newPassword, salt);
       db.prepare("UPDATE usuarios SET senha_hash = ?, reset_token = NULL, reset_token_expires = NULL WHERE id = ?").run(hash, user.id);
       
-      addLog(user.id, user.nome, 'Senha Redefinida', `O usuário ${user.nome} redefiniu sua senha com sucesso.`);
+      addLog(user.organization_id, user.id, user.nome, 'Senha Redefinida', `O usuário ${user.nome} redefiniu sua senha com sucesso.`);
       
       res.json({ success: true, message: "Senha redefinida com sucesso!" });
     } catch (error: any) {
@@ -1056,7 +1155,7 @@ async function startServer() {
         if (!user.role) user.role = 'guest';
 
         if (user.role === 'guest') {
-          const event = getActiveEvent();
+          const event = getActiveEvent(user.organization_id);
           if (event && event.ativo === 0) {
             return res.status(403).json({ error: "O evento está inativo no momento. O acesso ao painel está temporariamente suspenso." });
           }
@@ -1071,6 +1170,7 @@ async function startServer() {
         // Set session
         (req.session as any).userId = user.id;
         (req.session as any).userRole = user.role;
+        (req.session as any).organizationId = user.organization_id;
 
         res.json(user);
       } else {
@@ -1082,26 +1182,27 @@ async function startServer() {
     }
   });
 
-  app.get("/api/user/:id/balance", (req, res) => {
+  app.get("/api/user/:id/balance", authMiddleware, (req: any, res) => {
     const { id } = req.params;
-    const event = getActiveEvent();
+    const orgId = req.orgId;
+    const event = getActiveEvent(orgId);
     if (!event) return res.status(404).json({ error: "Nenhum evento ativo encontrado" });
     
-    const user = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(id) as any;
+    const user = db.prepare("SELECT * FROM usuarios WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
     if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
     const userId = user.id;
 
     const totalDue = user.rsvp_status === 'desistente' ? 0 : (user.valor_total !== null ? user.valor_total : event.valor_por_pessoa);
     
     // Only count 'concluido' payments for balance
-    const payments = db.prepare("SELECT SUM(valor) as total_paid FROM pagamentos WHERE usuario_id = ? AND evento_id = ? AND status = 'concluido'").get(userId, event.id);
-    const history = db.prepare("SELECT * FROM pagamentos WHERE usuario_id = ? AND evento_id = ? ORDER BY data_pagamento DESC").all(userId, event.id);
+    const payments = db.prepare("SELECT SUM(valor) as total_paid FROM pagamentos WHERE usuario_id = ? AND evento_id = ? AND status = 'concluido' AND organization_id = ?").get(userId, event.id, orgId);
+    const history = db.prepare("SELECT * FROM pagamentos WHERE usuario_id = ? AND evento_id = ? AND organization_id = ? ORDER BY data_pagamento DESC").all(userId, event.id, orgId);
     
     const totalPaid = (payments as any).total_paid || 0;
     const balance = totalDue - totalPaid;
     
     if (user.role === 'guest') {
-      addLog(user.id, user.nome, 'Visualização', `Convidado ${user.nome} visualizou o painel do cliente.`);
+      addLog(orgId, user.id, user.nome, 'Visualização', `Convidado ${user.nome} visualizou o painel do cliente.`);
     }
     
     res.json({
@@ -1115,14 +1216,15 @@ async function startServer() {
     });
   });
 
-  app.post("/api/user/rsvp", (req, res) => {
+  app.post("/api/user/rsvp", authMiddleware, (req: any, res) => {
     const { userId, action } = req.body;
+    const orgId = req.orgId;
     if (!userId || !action) return res.status(400).json({ error: "Dados incompletos" });
 
-    const user = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(userId) as any;
+    const user = db.prepare("SELECT * FROM usuarios WHERE id = ? AND organization_id = ?").get(userId, orgId) as any;
     if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
 
-    const event = getActiveEvent();
+    const event = getActiveEvent(orgId);
     if (!event) return res.status(404).json({ error: "Evento não encontrado" });
 
     // Check deadline
@@ -1135,15 +1237,15 @@ async function startServer() {
 
     if (action === 'confirm') {
       // Check capacity
-      const currentConfirmed = getCurrentOccupancy();
+      const currentConfirmed = getCurrentOccupancy(orgId);
       
       // Count this user + their approved companions
-      const userCompanions = db.prepare("SELECT COUNT(*) as count FROM acompanhantes WHERE usuario_id = ? AND status = 'aprovado'").get(userId) as any;
+      const userCompanions = db.prepare("SELECT COUNT(*) as count FROM acompanhantes WHERE usuario_id = ? AND status = 'aprovado' AND organization_id = ?").get(userId, orgId) as any;
       const userTotal = 1 + (userCompanions.count || 0);
 
       if (currentConfirmed + userTotal > (event.capacidade_maxima || 50)) {
-        db.prepare("UPDATE usuarios SET rsvp_status = 'lista_espera' WHERE id = ?").run(userId);
-        addLog(userId, user.nome, 'RSVP - Lista de Espera', `Entrou na lista de espera (Lotação atingida: ${currentConfirmed}/${event.capacidade_maxima})`);
+        db.prepare("UPDATE usuarios SET rsvp_status = 'lista_espera' WHERE id = ? AND organization_id = ?").run(userId, orgId);
+        addLog(orgId, userId, user.nome, 'RSVP - Lista de Espera', `Entrou na lista de espera (Lotação atingida: ${currentConfirmed}/${event.capacidade_maxima})`);
         return res.json({ 
           success: true, 
           status: 'lista_espera',
@@ -1151,35 +1253,35 @@ async function startServer() {
         });
       }
 
-      db.prepare("UPDATE usuarios SET rsvp_status = 'confirmado' WHERE id = ?").run(userId);
-      addLog(userId, user.nome, 'RSVP - Confirmado', "Confirmou presença via RSVP");
+      db.prepare("UPDATE usuarios SET rsvp_status = 'confirmado' WHERE id = ? AND organization_id = ?").run(userId, orgId);
+      addLog(orgId, userId, user.nome, 'RSVP - Confirmado', "Confirmou presença via RSVP");
       return res.json({ success: true, status: 'confirmado' });
     } else if (action === 'confirm_waitlist') {
       // Check capacity again
-      const currentConfirmed = getCurrentOccupancy();
-      const userCompanions = db.prepare("SELECT COUNT(*) as count FROM acompanhantes WHERE usuario_id = ? AND status = 'aprovado'").get(userId) as any;
+      const currentConfirmed = getCurrentOccupancy(orgId);
+      const userCompanions = db.prepare("SELECT COUNT(*) as count FROM acompanhantes WHERE usuario_id = ? AND status = 'aprovado' AND organization_id = ?").get(userId, orgId) as any;
       const userTotal = 1 + (userCompanions.count || 0);
 
       if (currentConfirmed + userTotal <= (event.capacidade_maxima || 50)) {
-        db.prepare("UPDATE usuarios SET rsvp_status = 'confirmado' WHERE id = ?").run(userId);
-        addLog(userId, user.nome, 'RSVP - Confirmado (Lista de Espera)', "Confirmou presença saindo da lista de espera");
+        db.prepare("UPDATE usuarios SET rsvp_status = 'confirmado' WHERE id = ? AND organization_id = ?").run(userId, orgId);
+        addLog(orgId, userId, user.nome, 'RSVP - Confirmado (Lista de Espera)', "Confirmou presença saindo da lista de espera");
         return res.json({ success: true, status: 'confirmado' });
       } else {
         return res.status(400).json({ error: "Ainda não há vagas disponíveis." });
       }
     } else if (action === 'decline') {
       // Auto-remove companions to free up space
-      const companionsCount = db.prepare("SELECT COUNT(*) as count FROM acompanhantes WHERE usuario_id = ?").get(userId) as any;
+      const companionsCount = db.prepare("SELECT COUNT(*) as count FROM acompanhantes WHERE usuario_id = ? AND organization_id = ?").get(userId, orgId) as any;
       if (companionsCount.count > 0) {
-        db.prepare("DELETE FROM acompanhantes WHERE usuario_id = ?").run(userId);
+        db.prepare("DELETE FROM acompanhantes WHERE usuario_id = ? AND organization_id = ?").run(userId, orgId);
         // Reset valor_total to single person value since companions are gone
-        db.prepare("UPDATE usuarios SET valor_total = ? WHERE id = ?").run(event.valor_por_pessoa, userId);
-        addLog(userId, user.nome, 'RSVP - Desistente (Limpou Acompanhantes)', `Informou que não poderá comparecer e removeu automaticamente ${companionsCount.count} acompanhante(s). Valor total resetado.`);
+        db.prepare("UPDATE usuarios SET valor_total = ? WHERE id = ? AND organization_id = ?").run(event.valor_por_pessoa, userId, orgId);
+        addLog(orgId, userId, user.nome, 'RSVP - Desistente (Limpou Acompanhantes)', `Informou que não poderá comparecer e removeu automaticamente ${companionsCount.count} acompanhante(s). Valor total resetado.`);
       } else {
-        addLog(userId, user.nome, 'RSVP - Desistente', "Informou que não poderá comparecer");
+        addLog(orgId, userId, user.nome, 'RSVP - Desistente', "Informou que não poderá comparecer");
       }
       
-      db.prepare("UPDATE usuarios SET rsvp_status = 'desistente' WHERE id = ?").run(userId);
+      db.prepare("UPDATE usuarios SET rsvp_status = 'desistente' WHERE id = ? AND organization_id = ?").run(userId, orgId);
       return res.json({ 
         success: true, 
         status: 'desistente',
@@ -1190,12 +1292,13 @@ async function startServer() {
     res.status(400).json({ error: "Ação inválida" });
   });
 
-  app.post("/api/user/profile-picture", async (req, res) => {
+  app.post("/api/user/profile-picture", authMiddleware, async (req: any, res) => {
     const { userId, imageBase64 } = req.body;
+    const orgId = req.orgId;
     if (!userId || !imageBase64) return res.status(400).json({ error: "Dados incompletos" });
 
     try {
-      const user = db.prepare("SELECT id, nome, role, codigo_convidado FROM usuarios WHERE id = ?").get(userId) as any;
+      const user = db.prepare("SELECT id, nome, role, codigo_convidado FROM usuarios WHERE id = ? AND organization_id = ?").get(userId, orgId) as any;
       if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
 
       const matches = imageBase64.match(/^data:image\/([A-Za-z-+/]+);base64,(.+)$/);
@@ -1204,7 +1307,7 @@ async function startServer() {
       const buffer = Buffer.from(matches[2], 'base64');
       const type = user.role === 'admin' ? 'admin' : 'convidado';
       const identifier = user.role === 'admin' ? user.id : (user.codigo_convidado || user.id);
-      const fileName = `perfil_${type}_${identifier}.jpg`;
+      const fileName = `perfil_${orgId}_${type}_${identifier}.jpg`;
       const filePath = path.join(perfilDir, fileName);
 
       await sharp(buffer)
@@ -1214,9 +1317,9 @@ async function startServer() {
         .toFile(filePath);
 
       const fotoUrl = `/perfil/${fileName}?t=${Date.now()}`;
-      db.prepare("UPDATE usuarios SET foto_perfil = ? WHERE id = ?").run(fotoUrl, userId);
+      db.prepare("UPDATE usuarios SET foto_perfil = ? WHERE id = ? AND organization_id = ?").run(fotoUrl, userId, orgId);
 
-      addLog(userId, user.nome || 'Usuário', 'Foto de Perfil', `Usuário atualizou sua foto de perfil.`);
+      addLog(orgId, userId, user.nome || 'Usuário', 'Foto de Perfil', `Usuário atualizou sua foto de perfil.`);
       res.json({ success: true, fotoUrl });
     } catch (error: any) {
       console.error("Profile picture upload error:", error);
@@ -1225,15 +1328,18 @@ async function startServer() {
   });
 
   // Submit Payment Receipt
-  app.post("/api/payments/submit", (req, res) => {
+  app.post("/api/payments/submit", authMiddleware, (req: any, res) => {
     const { userId, amount, comprovanteBase64 } = req.body;
-    const event = getActiveEvent();
+    const orgId = req.orgId;
+    const event = getActiveEvent(orgId);
     
     if (!event) {
       return res.status(404).json({ error: "Nenhum evento ativo encontrado" });
     }
     
-    const user = db.prepare("SELECT nome FROM usuarios WHERE id = ?").get(userId) as any;
+    const user = db.prepare("SELECT nome FROM usuarios WHERE id = ? AND organization_id = ?").get(userId, orgId) as any;
+    if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
+
     const sanitizedName = (user?.nome || 'usuario')
       .toLowerCase()
       .normalize("NFD")
@@ -1241,18 +1347,19 @@ async function startServer() {
       .replace(/[^a-z0-9]/g, '_')
       .replace(/_+/g, '_');
     
-    const customFileName = `pagamento_${userId}_${sanitizedName}`;
+    const customFileName = `pagamento_${orgId}_${userId}_${sanitizedName}`;
     const comprovanteUrl = saveBase64Image(comprovanteBase64, 'comprovante', customFileName);
 
     try {
-      db.prepare("INSERT INTO pagamentos (usuario_id, evento_id, valor, status, comprovante_url) VALUES (?, ?, ?, ?, ?)").run(
+      db.prepare("INSERT INTO pagamentos (organization_id, usuario_id, evento_id, valor, status, comprovante_url) VALUES (?, ?, ?, ?, ?, ?)").run(
+        orgId,
         userId, 
         event.id, 
         amount, 
         'pendente',
         comprovanteUrl
       );
-      addLog(userId, user?.nome || 'Usuário', 'Envio de Comprovante', `Convidado ${user?.nome} enviou um comprovante de R$ ${amount} para análise.`);
+      addLog(orgId, userId, user?.nome || 'Usuário', 'Envio de Comprovante', `Convidado ${user?.nome} enviou um comprovante de R$ ${amount} para análise.`);
       res.json({ success: true });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -1260,28 +1367,30 @@ async function startServer() {
   });
 
   // Admin: List Pending Payments
-  app.get("/api/admin/pending-payments", (req, res) => {
+  app.get("/api/admin/pending-payments", adminMiddleware, (req: any, res) => {
+    const orgId = req.orgId;
     const payments = db.prepare(`
       SELECT p.*, u.nome as user_name, u.email as user_email, u.whatsapp 
       FROM pagamentos p 
       JOIN usuarios u ON p.usuario_id = u.id 
-      WHERE p.status = 'pendente'
+      WHERE p.status = 'pendente' AND p.organization_id = ?
       ORDER BY p.data_pagamento ASC
-    `).all();
+    `).all(orgId);
     res.json(payments);
   });
 
-  app.post("/api/admin/guests/update-all-values", (req, res) => {
+  app.post("/api/admin/guests/update-all-values", adminMiddleware, (req: any, res) => {
     const { valor } = req.body;
+    const orgId = req.orgId;
     if (valor === undefined || isNaN(Number(valor))) {
       return res.status(400).json({ error: "Valor inválido" });
     }
 
     try {
-      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' AND organization_id = ? LIMIT 1").get(orgId) as any;
       // Atualiza o valor total considerando o valor base por pessoa e a quantidade de acompanhantes declarada no cadastro
-      db.prepare("UPDATE usuarios SET valor_total = ? * (1 + acompanhantes_count) WHERE role = 'guest'").run(Number(valor));
-      addLog(admin?.id || null, admin?.nome || 'Adm', 'Atualização em Massa', `Adm ${admin?.nome} atualizou o valor base de todos os convidados para R$ ${valor}. O total de cada um foi recalculado com base nos acompanhantes.`);
+      db.prepare("UPDATE usuarios SET valor_total = ? * (1 + acompanhantes_count) WHERE role = 'guest' AND organization_id = ?").run(Number(valor), orgId);
+      addLog(orgId, admin?.id || null, admin?.nome || 'Adm', 'Atualização em Massa', `Adm ${admin?.nome} atualizou o valor base de todos os convidados para R$ ${valor}. O total de cada um foi recalculado com base nos acompanhantes.`);
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -1289,33 +1398,36 @@ async function startServer() {
   });
 
   // Guest Management Endpoints
-  app.get("/api/admin/guests", (req, res) => {
+  app.get("/api/admin/guests", adminMiddleware, (req: any, res) => {
+    const orgId = req.orgId;
     const guests = db.prepare(`
       SELECT u.id, u.nome, u.email, u.whatsapp, u.instagram, u.confirmado, u.valor_total, u.codigo_convidado, u.status, u.acompanhantes_count,
-      (SELECT COUNT(*) FROM acompanhantes WHERE usuario_id = u.id) as companion_count
+      (SELECT COUNT(*) FROM acompanhantes WHERE usuario_id = u.id AND organization_id = ?) as companion_count
       FROM usuarios u 
-      WHERE u.role = 'guest' 
+      WHERE u.role = 'guest' AND u.organization_id = ?
       ORDER BY u.nome ASC
-    `).all();
+    `).all(orgId, orgId);
     
     // Enrich with companion details
     const enrichedGuests = guests.map((g: any) => {
-      const companions = db.prepare("SELECT id, nome, instagram, status FROM acompanhantes WHERE usuario_id = ?").all(g.id);
+      const companions = db.prepare("SELECT id, nome, instagram, status FROM acompanhantes WHERE usuario_id = ? AND organization_id = ?").all(g.id, orgId);
       return { ...g, companions };
     });
     
     res.json(enrichedGuests);
   });
 
-  app.get("/api/companions/:userId", (req, res) => {
+  app.get("/api/companions/:userId", authMiddleware, (req: any, res) => {
     const { userId } = req.params;
-    const companions = db.prepare("SELECT * FROM acompanhantes WHERE usuario_id = ?").all(userId);
+    const orgId = req.orgId;
+    const companions = db.prepare("SELECT * FROM acompanhantes WHERE usuario_id = ? AND organization_id = ?").all(userId, orgId);
     res.json(companions);
   });
 
-  app.post("/api/companions", (req, res) => {
+  app.post("/api/companions", authMiddleware, (req: any, res) => {
     const { userId, nome, instagram } = req.body;
-    const event = getActiveEvent();
+    const orgId = req.orgId;
+    const event = getActiveEvent(orgId);
     
     if (!event) {
       return res.status(404).json({ error: "Nenhum evento ativo encontrado" });
@@ -1323,7 +1435,7 @@ async function startServer() {
 
     try {
       // Security Check: Must be confirmed to add companions
-      const user = db.prepare("SELECT nome, rsvp_status FROM usuarios WHERE id = ?").get(userId) as any;
+      const user = db.prepare("SELECT nome, rsvp_status FROM usuarios WHERE id = ? AND organization_id = ?").get(userId, orgId) as any;
       if (!user || user.rsvp_status !== 'confirmado') {
         return res.status(403).json({ error: "Você precisa confirmar sua presença antes de adicionar acompanhantes." });
       }
@@ -1332,7 +1444,7 @@ async function startServer() {
       const limit = event?.limite_acompanhantes || 4;
 
       // Check limit
-      const count = db.prepare("SELECT COUNT(*) as count FROM acompanhantes WHERE usuario_id = ?").get(userId) as any;
+      const count = db.prepare("SELECT COUNT(*) as count FROM acompanhantes WHERE usuario_id = ? AND organization_id = ?").get(userId, orgId) as any;
       if (count.count >= limit) {
         return res.status(400).json({ error: `Desculpe, cada convidado pode levar no máximo ${limit} acompanhantes para garantir o conforto de todos na Resenha.` });
       }
@@ -1340,9 +1452,9 @@ async function startServer() {
       // Check if user has already paid (cannot add companions if paid/quitado)
       const guestStats = db.prepare(`
         SELECT u.valor_total, 
-        COALESCE((SELECT SUM(valor) FROM pagamentos WHERE usuario_id = u.id AND status = 'concluido'), 0) as paid
-        FROM usuarios u WHERE u.id = ?
-      `).get(userId) as any;
+        COALESCE((SELECT SUM(valor) FROM pagamentos WHERE usuario_id = u.id AND status = 'concluido' AND organization_id = ?), 0) as paid
+        FROM usuarios u WHERE u.id = ? AND u.organization_id = ?
+      `).get(orgId, userId, orgId) as any;
 
       if (guestStats && guestStats.paid >= guestStats.valor_total) {
         return res.status(400).json({ error: "Não é possível adicionar acompanhantes após a quitação do convite." });
@@ -1351,21 +1463,21 @@ async function startServer() {
       // Strict Instagram Validation for Companions
       if (instagram) {
         // 1. Check if already a main guest
-        const existingMainUser = db.prepare("SELECT id FROM usuarios WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?)").get(instagram);
+        const existingMainUser = db.prepare("SELECT id FROM usuarios WHERE organization_id = ? AND instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?)").get(orgId, instagram);
         if (existingMainUser) {
           return res.status(400).json({ error: "Este perfil já possui um cadastro individual e não pode ser adicionado como acompanhante." });
         }
 
         // 2. Check if already a companion of someone else
-        const existingCompanion = db.prepare("SELECT id FROM acompanhantes WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?)").get(instagram);
+        const existingCompanion = db.prepare("SELECT id FROM acompanhantes WHERE organization_id = ? AND instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?)").get(orgId, instagram);
         if (existingCompanion) {
           return res.status(400).json({ error: "Este perfil já está registrado como acompanhante de outro convidado." });
         }
       }
 
-      db.prepare("INSERT INTO acompanhantes (usuario_id, nome, instagram, status) VALUES (?, ?, ?, 'pendente_aprovacao')").run(userId, nome, instagram);
+      db.prepare("INSERT INTO acompanhantes (organization_id, usuario_id, nome, instagram, status) VALUES (?, ?, ?, ?, 'pendente_aprovacao')").run(orgId, userId, nome, instagram);
       
-      addLog(userId, user?.nome || 'Usuário', 'Solicitação de Acompanhante', `Convidado ${user?.nome} solicitou a adição do acompanhante ${nome}. Aguardando aprovação.`);
+      addLog(orgId, userId, user?.nome || 'Usuário', 'Solicitação de Acompanhante', `Convidado ${user?.nome} solicitou a adição do acompanhante ${nome}. Aguardando aprovação.`);
       
       res.json({ success: true });
     } catch (error: any) {
@@ -1373,36 +1485,37 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/companions/:id/approve", (req, res) => {
+  app.post("/api/admin/companions/:id/approve", adminMiddleware, (req: any, res) => {
     const { id } = req.params;
-    const event = getActiveEvent();
+    const orgId = req.orgId;
+    const event = getActiveEvent(orgId);
     if (!event) return res.status(404).json({ error: "Evento não encontrado" });
 
     try {
-      const companion = db.prepare("SELECT * FROM acompanhantes WHERE id = ?").get(id) as any;
+      const companion = db.prepare("SELECT * FROM acompanhantes WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
       if (!companion) return res.status(404).json({ error: "Acompanhante não encontrado" });
       if (companion.status === 'aprovado') return res.json({ success: true });
 
-      db.prepare("UPDATE acompanhantes SET status = 'aprovado' WHERE id = ?").run(id);
+      db.prepare("UPDATE acompanhantes SET status = 'aprovado' WHERE id = ? AND organization_id = ?").run(id, orgId);
       
       // Update guest total value
-      const guest = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(companion.usuario_id) as any;
-      const approvedCount = db.prepare("SELECT COUNT(*) as count FROM acompanhantes WHERE usuario_id = ? AND status = 'aprovado' AND id != ?").get(companion.usuario_id, id) as any;
+      const guest = db.prepare("SELECT * FROM usuarios WHERE id = ? AND organization_id = ?").get(companion.usuario_id, orgId) as any;
+      const approvedCount = db.prepare("SELECT COUNT(*) as count FROM acompanhantes WHERE usuario_id = ? AND status = 'aprovado' AND id != ? AND organization_id = ?").get(companion.usuario_id, id, orgId) as any;
       
       // Se o número de acompanhantes já aprovados for maior ou igual ao número inicial declarado no cadastro,
       // cada novo acompanhante aprovado incrementa o valor total.
       // Caso contrário, o valor já estava embutido no valor_total inicial.
       if (approvedCount.count >= (guest.acompanhantes_count || 0)) {
         const newValue = (guest?.valor_total || 0) + event.valor_por_pessoa;
-        db.prepare("UPDATE usuarios SET valor_total = ? WHERE id = ?").run(newValue, companion.usuario_id);
+        db.prepare("UPDATE usuarios SET valor_total = ? WHERE id = ? AND organization_id = ?").run(newValue, companion.usuario_id, orgId);
       }
       
-      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
-      addLog(admin?.id || null, admin?.nome || 'Adm', 'Aprovação de Acompanhante', `Adm ${admin?.nome} aprovou o acompanhante ${companion.nome}. Valor total atualizado.`);
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
+      addLog(orgId, admin?.id || null, admin?.nome || 'Adm', 'Aprovação de Acompanhante', `Adm ${admin?.nome} aprovou o acompanhante ${companion.nome}. Valor total atualizado.`);
       
       // Email Trigger: Companion Approved
       if (guest && guest.email) {
-        const template = getTemplate('email_approval_companion');
+        const template = getTemplate(orgId, 'email_approval_companion');
         const emailContent = parseTemplate(template, {
           tipo: 'email_approval_companion',
           nome: guest.nome,
@@ -1410,7 +1523,7 @@ async function startServer() {
           acompanhante: companion.nome
         });
         sendEmail(guest.email, `Acompanhante Aprovado - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
-          if (success) addLog(guest.id, guest.nome, 'E-mail Enviado', `E-mail de aprovação de acompanhante (${companion.nome}) enviado para ${guest.email}.`);
+          if (success) addLog(orgId, guest.id, guest.nome, 'E-mail Enviado', `E-mail de aprovação de acompanhante (${companion.nome}) enviado para ${guest.email}.`);
         });
       }
 
@@ -1420,17 +1533,18 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/admin/companions/:id/reject", (req, res) => {
+  app.delete("/api/admin/companions/:id/reject", adminMiddleware, (req: any, res) => {
     const id = Number(req.params.id);
+    const orgId = req.orgId;
     console.log(`REJECT COMPANION REQUEST: id=${id}`);
     try {
-      const companion = db.prepare("SELECT * FROM acompanhantes WHERE id = ?").get(id) as any;
+      const companion = db.prepare("SELECT * FROM acompanhantes WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
       if (!companion) return res.status(404).json({ error: "Acompanhante não encontrado" });
 
-      db.prepare("DELETE FROM acompanhantes WHERE id = ?").run(id);
+      db.prepare("DELETE FROM acompanhantes WHERE id = ? AND organization_id = ?").run(id, orgId);
       
-      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
-      addLog(admin?.id || null, admin?.nome || 'Adm', 'Rejeição de Acompanhante', `Adm ${admin?.nome} rejeitou o acompanhante ${companion.nome}.`);
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
+      addLog(orgId, admin?.id || null, admin?.nome || 'Adm', 'Rejeição de Acompanhante', `Adm ${admin?.nome} rejeitou o acompanhante ${companion.nome}.`);
       
       res.json({ success: true });
     } catch (error: any) {
@@ -1439,31 +1553,32 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/companions/:id", (req, res) => {
+  app.delete("/api/companions/:id", authMiddleware, (req: any, res) => {
     const id = Number(req.params.id);
-    const userId = req.query.userId || req.body.userId;
-    const isAdmin = req.query.isAdmin === 'true' || req.body.isAdmin === true;
+    const orgId = req.orgId;
+    const userId = req.userId;
+    const isAdmin = (req.session as any).userRole === 'admin';
     
     console.log(`DELETE COMPANION REQUEST: id=${id}, userId=${userId}, isAdmin=${isAdmin}`);
-    const event = getActiveEvent();
+    const event = getActiveEvent(orgId);
 
     try {
-      const companion = db.prepare("SELECT * FROM acompanhantes WHERE id = ?").get(id) as any;
+      const companion = db.prepare("SELECT * FROM acompanhantes WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
       if (!companion) {
         console.log(`Companion not found: ${id}`);
         return res.status(404).json({ error: `Acompanhante ID ${id} não encontrado.` });
       }
 
-      const targetUserId = Number(userId || companion.usuario_id);
+      const targetUserId = isAdmin ? companion.usuario_id : userId;
       console.log(`Deleting companion ${companion.nome} for user ${targetUserId}`);
 
       // Check if user has already paid (only for non-admin requests)
       if (!isAdmin) {
         const guestStats = db.prepare(`
           SELECT u.valor_total, 
-          COALESCE((SELECT SUM(valor) FROM pagamentos WHERE usuario_id = u.id AND status = 'concluido'), 0) as paid
-          FROM usuarios u WHERE u.id = ?
-        `).get(targetUserId) as any;
+          COALESCE((SELECT SUM(valor) FROM pagamentos WHERE usuario_id = u.id AND status = 'concluido' AND organization_id = ?), 0) as paid
+          FROM usuarios u WHERE u.id = ? AND u.organization_id = ?
+        `).get(orgId, targetUserId, orgId) as any;
 
         if (guestStats && guestStats.paid >= guestStats.valor_total && guestStats.valor_total > 0) {
           console.log(`Cannot delete companion: user ${targetUserId} already paid.`);
@@ -1473,20 +1588,20 @@ async function startServer() {
 
       const guestStats = db.prepare(`
         SELECT u.valor_total, u.nome
-        FROM usuarios u WHERE u.id = ?
-      `).get(targetUserId) as any;
+        FROM usuarios u WHERE u.id = ? AND u.organization_id = ?
+      `).get(targetUserId, orgId) as any;
 
-      const deleteInfo = db.prepare("DELETE FROM acompanhantes WHERE id = ?").run(id);
+      const deleteInfo = db.prepare("DELETE FROM acompanhantes WHERE id = ? AND organization_id = ?").run(id, orgId);
       console.log(`Delete result:`, deleteInfo);
       
       if (deleteInfo.changes > 0 && companion.status === 'aprovado') {
         const newValue = Math.max(0, (guestStats?.valor_total || 0) - (event?.valor_por_pessoa || 0));
-        db.prepare("UPDATE usuarios SET valor_total = ? WHERE id = ?").run(newValue, targetUserId);
+        db.prepare("UPDATE usuarios SET valor_total = ? WHERE id = ? AND organization_id = ?").run(newValue, targetUserId, orgId);
         console.log(`Updated user ${targetUserId} valor_total to ${newValue}`);
       }
       
       const logUser = isAdmin ? "Administrador" : (guestStats?.nome || 'Usuário');
-      addLog(targetUserId, logUser, 'Remoção de Acompanhante', `${logUser} removeu o acompanhante ${companion.nome}.`);
+      addLog(orgId, targetUserId, logUser, 'Remoção de Acompanhante', `${logUser} removeu o acompanhante ${companion.nome}.`);
       
       res.json({ success: true });
     } catch (error: any) {
@@ -1495,8 +1610,9 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/guests", (req, res) => {
+  app.post("/api/admin/guests", adminMiddleware, (req: any, res) => {
     let { nome, email, whatsapp, instagram, password, valor_total, acompanhantes_count, rsvp_status } = req.body;
+    const orgId = req.orgId;
     
     nome = sanitize(nome);
     email = sanitize(email);
@@ -1507,16 +1623,16 @@ async function startServer() {
       return res.status(400).json({ error: "Por favor, informe um número de WhatsApp válido com DDD." });
     }
 
-    const event = getActiveEvent();
+    const event = getActiveEvent(orgId);
     const count = parseInt(acompanhantes_count) || 0;
 
     // Duplicity check for Admin
     if (instagram) {
-      const existingUser = db.prepare("SELECT id FROM usuarios WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?)").get(instagram);
+      const existingUser = db.prepare("SELECT id FROM usuarios WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?) AND organization_id = ?").get(instagram, orgId);
       if (existingUser) {
         return res.status(400).json({ error: "Este instagram já possui um cadastro individual." });
       }
-      const existingCompanion = db.prepare("SELECT id FROM acompanhantes WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?)").get(instagram);
+      const existingCompanion = db.prepare("SELECT id FROM acompanhantes WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?) AND organization_id = ?").get(instagram, orgId);
       if (existingCompanion) {
         return res.status(400).json({ error: "Este instagram já está registrado como acompanhante de outro convidado." });
       }
@@ -1529,51 +1645,52 @@ async function startServer() {
       const salt = bcrypt.genSaltSync(10);
       const hash = bcrypt.hashSync(password || '123456', salt);
       const result = db.prepare(
-        "INSERT INTO usuarios (nome, email, whatsapp, instagram, senha_hash, role, valor_total, codigo_convidado, acompanhantes_count, rsvp_status) VALUES (?, ?, ?, ?, ?, 'guest', ?, ?, ?, ?)"
-      ).run(nome, email, whatsapp, instagram, hash, finalValue, guestCode, count, rsvp_status || null);
-      const guest = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(result.lastInsertRowid) as any;
-      const admin = db.prepare("SELECT nome FROM usuarios WHERE is_master = 1 LIMIT 1").get() as any;
-      addLog(admin?.id || null, admin?.nome || 'Adm', 'Criação de Convidado', `Adm ${admin?.nome} cadastrou o convidado ${nome} com valor de R$ ${finalValue}.`);
+        "INSERT INTO usuarios (nome, email, whatsapp, instagram, senha_hash, role, valor_total, codigo_convidado, acompanhantes_count, rsvp_status, organization_id) VALUES (?, ?, ?, ?, ?, 'guest', ?, ?, ?, ?, ?)"
+      ).run(nome, email, whatsapp, instagram, hash, finalValue, guestCode, count, rsvp_status || null, orgId);
+      const guest = db.prepare("SELECT * FROM usuarios WHERE id = ? AND organization_id = ?").get(result.lastInsertRowid, orgId) as any;
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
+      addLog(orgId, admin?.id || null, admin?.nome || 'Adm', 'Criação de Convidado', `Adm ${admin?.nome} cadastrou o convidado ${nome} com valor de R$ ${finalValue}.`);
       res.json(guest);
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
   });
 
-  app.put("/api/admin/guests/:id", (req, res) => {
+  app.put("/api/admin/guests/:id", adminMiddleware, (req: any, res) => {
     const { nome, email, whatsapp, instagram, valor_total, acompanhantes_count, rsvp_status } = req.body;
     const { id } = req.params;
+    const orgId = req.orgId;
 
     if (!validatePhone(whatsapp)) {
       return res.status(400).json({ error: "Por favor, informe um número de WhatsApp válido com DDD." });
     }
 
     try {
-      const oldGuest = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(id) as any;
+      const oldGuest = db.prepare("SELECT * FROM usuarios WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
       if (!oldGuest) return res.status(404).json({ error: "Convidado não encontrado" });
 
       // Duplicity check for Admin Update
       if (instagram && instagram.toLowerCase() !== (oldGuest.instagram || '').toLowerCase()) {
-        const existingUser = db.prepare("SELECT id FROM usuarios WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?) AND id != ?").get(instagram, id);
+        const existingUser = db.prepare("SELECT id FROM usuarios WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?) AND id != ? AND organization_id = ?").get(instagram, id, orgId);
         if (existingUser) {
           return res.status(400).json({ error: "Este instagram já possui um cadastro individual." });
         }
-        const existingCompanion = db.prepare("SELECT id FROM acompanhantes WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?)").get(instagram);
+        const existingCompanion = db.prepare("SELECT id FROM acompanhantes WHERE instagram IS NOT NULL AND instagram != '' AND LOWER(instagram) = LOWER(?) AND organization_id = ?").get(instagram, orgId);
         if (existingCompanion) {
           return res.status(400).json({ error: "Este instagram já está registrado como acompanhante de outro convidado." });
         }
       }
 
       db.prepare(
-        "UPDATE usuarios SET nome = ?, email = ?, whatsapp = ?, instagram = ?, valor_total = ?, acompanhantes_count = ?, rsvp_status = ? WHERE id = ?"
-      ).run(nome, email, whatsapp, instagram, valor_total, acompanhantes_count, rsvp_status, id);
+        "UPDATE usuarios SET nome = ?, email = ?, whatsapp = ?, instagram = ?, valor_total = ?, acompanhantes_count = ?, rsvp_status = ? WHERE id = ? AND organization_id = ?"
+      ).run(nome, email, whatsapp, instagram, valor_total, acompanhantes_count, rsvp_status, id, orgId);
       
-      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
       let msg = `Adm ${admin?.nome} alterou dados de ${nome}.`;
       if (oldGuest.valor_total !== Number(valor_total)) {
         msg = `Adm ${admin?.nome} alterou o valor do convite de ${nome} de R$ ${oldGuest.valor_total} para R$ ${valor_total}.`;
       }
-      addLog(admin?.id || null, admin?.nome || 'Adm', 'Edição de Convidado', msg);
+      addLog(orgId, admin?.id || null, admin?.nome || 'Adm', 'Edição de Convidado', msg);
       
       res.json({ success: true });
     } catch (error: any) {
@@ -1581,29 +1698,30 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/admin/guests/:id", (req, res) => {
+  app.delete("/api/admin/guests/:id", adminMiddleware, (req: any, res) => {
     const id = Number(req.params.id);
+    const orgId = req.orgId;
     console.log(`DELETE GUEST REQUEST: id=${id}`);
     try {
-      const guest = db.prepare("SELECT nome FROM usuarios WHERE id = ?").get(id) as any;
+      const guest = db.prepare("SELECT nome FROM usuarios WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
       if (!guest) {
         console.log(`Guest not found: ${id}`);
         return res.status(404).json({ error: "Convidado não encontrado" });
       }
 
       // Delete associated data
-      db.prepare("DELETE FROM pagamentos WHERE usuario_id = ?").run(id);
-      db.prepare("DELETE FROM acompanhantes WHERE usuario_id = ?").run(id);
-      db.prepare("DELETE FROM logs_atividades WHERE usuario_id = ?").run(id);
-      const deleteInfo = db.prepare("DELETE FROM usuarios WHERE id = ?").run(id);
+      db.prepare("DELETE FROM pagamentos WHERE usuario_id = ? AND organization_id = ?").run(id, orgId);
+      db.prepare("DELETE FROM acompanhantes WHERE usuario_id = ? AND organization_id = ?").run(id, orgId);
+      db.prepare("DELETE FROM logs_atividades WHERE usuario_id = ? AND organization_id = ?").run(id, orgId);
+      const deleteInfo = db.prepare("DELETE FROM usuarios WHERE id = ? AND organization_id = ?").run(id, orgId);
       console.log(`Delete result:`, deleteInfo);
       
       if (deleteInfo.changes === 0) {
         return res.status(500).json({ error: "Falha ao excluir convidado do banco de dados." });
       }
 
-      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
-      addLog(admin?.id || null, admin?.nome || 'Adm', 'Exclusão de Convidado', `Adm ${admin?.nome} excluiu o convidado ${guest?.nome}.`);
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
+      addLog(orgId, admin?.id || null, admin?.nome || 'Adm', 'Exclusão de Convidado', `Adm ${admin?.nome} excluiu o convidado ${guest?.nome}.`);
       
       res.json({ success: true });
     } catch (error: any) {
@@ -1613,28 +1731,30 @@ async function startServer() {
   });
 
   // Admin: Refund Payment
-  app.post("/api/admin/guests/:id/refund", (req, res) => {
+  app.post("/api/admin/guests/:id/refund", adminMiddleware, (req: any, res) => {
     const { id } = req.params;
     const { amount, reason } = req.body;
-    const event = getActiveEvent();
+    const orgId = req.orgId;
+    const event = getActiveEvent(orgId);
 
     if (!event) return res.status(404).json({ error: "Evento não encontrado" });
 
     try {
-      const guest = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(id) as any;
+      const guest = db.prepare("SELECT * FROM usuarios WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
       if (!guest) return res.status(404).json({ error: "Convidado não encontrado" });
 
       // Insert a negative payment record to represent the refund
-      db.prepare("INSERT INTO pagamentos (usuario_id, evento_id, valor, status, observacao) VALUES (?, ?, ?, ?, ?)").run(
+      db.prepare("INSERT INTO pagamentos (usuario_id, evento_id, valor, status, observacao, organization_id) VALUES (?, ?, ?, ?, ?, ?)").run(
         id,
         event.id,
         -Math.abs(amount),
         'concluido',
-        reason || 'Devolução de Valor (Estorno)'
+        reason || 'Devolução de Valor (Estorno)',
+        orgId
       );
 
-      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
-      addLog(admin?.id || null, admin?.nome || 'Adm', 'Devolução de Valor', `Adm ${admin?.nome} devolveu R$ ${amount} para ${guest.nome}. Motivo: ${reason || 'Não informado'}`);
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
+      addLog(orgId, admin?.id || null, admin?.nome || 'Adm', 'Devolução de Valor', `Adm ${admin?.nome} devolveu R$ ${amount} para ${guest.nome}. Motivo: ${reason || 'Não informado'}`);
 
       res.json({ success: true });
     } catch (error: any) {
@@ -1643,18 +1763,19 @@ async function startServer() {
   });
 
   // Admin: Change RSVP Status
-  app.post("/api/admin/guests/:id/rsvp-status", (req, res) => {
+  app.post("/api/admin/guests/:id/rsvp-status", adminMiddleware, (req: any, res) => {
     const { id } = req.params;
     const { status } = req.body; // 'confirmado', 'desistente', 'lista_espera'
+    const orgId = req.orgId;
 
     try {
-      const guest = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(id) as any;
+      const guest = db.prepare("SELECT * FROM usuarios WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
       if (!guest) return res.status(404).json({ error: "Convidado não encontrado" });
 
-      db.prepare("UPDATE usuarios SET rsvp_status = ? WHERE id = ?").run(status, id);
+      db.prepare("UPDATE usuarios SET rsvp_status = ? WHERE id = ? AND organization_id = ?").run(status, id, orgId);
 
-      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
-      addLog(admin?.id || null, admin?.nome || 'Adm', 'Alteração RSVP', `Adm ${admin?.nome} alterou o status de presença de ${guest.nome} para ${status}.`);
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
+      addLog(orgId, admin?.id || null, admin?.nome || 'Adm', 'Alteração RSVP', `Adm ${admin?.nome} alterou o status de presença de ${guest.nome} para ${status}.`);
 
       res.json({ success: true });
     } catch (error: any) {
@@ -1663,34 +1784,36 @@ async function startServer() {
   });
 
   // Admin: Manual Payment Entry
-  app.post("/api/admin/payments/manual", (req, res) => {
+  app.post("/api/admin/payments/manual", adminMiddleware, (req: any, res) => {
     const { userId, amount, observation } = req.body;
-    const event = getActiveEvent();
+    const orgId = req.orgId;
+    const event = getActiveEvent(orgId);
     
     if (!event) {
       return res.status(404).json({ error: "Nenhum evento ativo encontrado" });
     }
     
     try {
-      db.prepare("INSERT INTO pagamentos (usuario_id, evento_id, valor, status, observacao) VALUES (?, ?, ?, ?, ?)").run(
+      db.prepare("INSERT INTO pagamentos (usuario_id, evento_id, valor, status, observacao, organization_id) VALUES (?, ?, ?, ?, ?, ?)").run(
         userId, 
         event.id, 
         amount, 
         'concluido',
-        observation || 'Recebimento Manual pelo Organizador'
+        observation || 'Recebimento Manual pelo Organizador',
+        orgId
       );
-      const guest = db.prepare("SELECT nome FROM usuarios WHERE id = ?").get(userId) as any;
-      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
-      addLog(admin?.id || null, admin?.nome || 'Adm', 'Baixa Manual', `Adm ${admin?.nome} registrou baixa manual de R$ ${amount} para ${guest?.nome}.`);
+      const guest = db.prepare("SELECT nome FROM usuarios WHERE id = ? AND organization_id = ?").get(userId, orgId) as any;
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
+      addLog(orgId, admin?.id || null, admin?.nome || 'Adm', 'Baixa Manual', `Adm ${admin?.nome} registrou baixa manual de R$ ${amount} para ${guest?.nome}.`);
       
       // Email Trigger: Payment Receipt
-      const user = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(userId) as any;
+      const user = db.prepare("SELECT * FROM usuarios WHERE id = ? AND organization_id = ?").get(userId, orgId) as any;
       if (user && user.email) {
-        const totalPaidResult = db.prepare("SELECT SUM(valor) as total FROM pagamentos WHERE usuario_id = ? AND status = 'concluido'").get(userId) as any;
+        const totalPaidResult = db.prepare("SELECT SUM(valor) as total FROM pagamentos WHERE usuario_id = ? AND status = 'concluido' AND organization_id = ?").get(userId, orgId) as any;
         const totalPaid = totalPaidResult.total || 0;
         const balance = Math.max(0, user.valor_total - totalPaid);
 
-        const template = getTemplate('email_payment_confirm');
+        const template = getTemplate(orgId, 'email_payment_confirm');
         const emailContent = parseTemplate(template, {
           tipo: 'email_payment_confirm',
           nome: user.nome,
@@ -1699,7 +1822,7 @@ async function startServer() {
           evento: event.nome
         });
         sendEmail(user.email, `Recibo de Pagamento - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
-          if (success) addLog(user.id, user.nome, 'E-mail Enviado', `E-mail de recibo de pagamento (R$ ${amount}) enviado para ${user.email}.`);
+          if (success) addLog(orgId, user.id, user.nome, 'E-mail Enviado', `E-mail de recibo de pagamento (R$ ${amount}) enviado para ${user.email}.`);
         });
       }
 
@@ -1710,13 +1833,14 @@ async function startServer() {
   });
 
   // Admin: Approve/Reject Payment
-  app.post("/api/admin/payments/:id/action", (req, res) => {
+  app.post("/api/admin/payments/:id/action", adminMiddleware, (req: any, res) => {
     const { id } = req.params;
     const { action } = req.body; // 'approve' or 'reject'
     const status = action === 'approve' ? 'concluido' : 'rejeitado';
+    const orgId = req.orgId;
     
     try {
-      const payment = db.prepare("SELECT p.*, u.nome as user_name, u.email as user_email, u.valor_total FROM pagamentos p JOIN usuarios u ON p.usuario_id = u.id WHERE p.id = ?").get(id) as any;
+      const payment = db.prepare("SELECT p.*, u.nome as user_name, u.email as user_email, u.valor_total FROM pagamentos p JOIN usuarios u ON p.usuario_id = u.id WHERE p.id = ? AND p.organization_id = ?").get(id, orgId) as any;
       
       if (!payment) {
         return res.status(404).json({ error: "Pagamento não encontrado" });
@@ -1739,24 +1863,24 @@ async function startServer() {
         }
       }
 
-      db.prepare("UPDATE pagamentos SET status = ?, comprovante_url = NULL WHERE id = ?").run(status, id);
+      db.prepare("UPDATE pagamentos SET status = ?, comprovante_url = NULL WHERE id = ? AND organization_id = ?").run(status, id, orgId);
       
-      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
       const acao = action === 'approve' ? 'Aprovação de Pix' : 'Rejeição de Pix';
       const msg = action === 'approve' 
         ? `Adm ${admin?.nome} aprovou o Pix de R$ ${payment.valor} de ${payment.user_name}.`
         : `Adm ${admin?.nome} rejeitou o Pix de R$ ${payment.valor} de ${payment.user_name}.`;
       
-      addLog(admin?.id || null, admin?.nome || 'Adm', acao, msg);
+      addLog(orgId, admin?.id || null, admin?.nome || 'Adm', acao, msg);
 
       // Email Trigger: Payment Approved
       if (action === 'approve') {
-        const event = getActiveEvent();
-        const totalPaidResult = db.prepare("SELECT SUM(valor) as total FROM pagamentos WHERE usuario_id = ? AND status = 'concluido'").get(payment.usuario_id) as any;
+        const event = getActiveEvent(orgId);
+        const totalPaidResult = db.prepare("SELECT SUM(valor) as total FROM pagamentos WHERE usuario_id = ? AND status = 'concluido' AND organization_id = ?").get(payment.usuario_id, orgId) as any;
         const totalPaid = totalPaidResult.total || 0;
         const balance = Math.max(0, payment.valor_total - totalPaid);
 
-        const template = getTemplate('email_payment_confirm');
+        const template = getTemplate(orgId, 'email_payment_confirm');
         const emailContent = parseTemplate(template, {
           tipo: 'email_payment_confirm',
           nome: payment.user_name,
@@ -1765,7 +1889,7 @@ async function startServer() {
           evento: event.nome
         });
         sendEmail(payment.user_email, `Pagamento Confirmado - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
-          if (success) addLog(payment.usuario_id, payment.user_name, 'E-mail Enviado', `E-mail de confirmação de pagamento Pix (R$ ${payment.valor}) enviado para ${payment.user_email}.`);
+          if (success) addLog(orgId, payment.usuario_id, payment.user_name, 'E-mail Enviado', `E-mail de confirmação de pagamento Pix (R$ ${payment.valor}) enviado para ${payment.user_email}.`);
         });
       }
       
@@ -1775,38 +1899,39 @@ async function startServer() {
     }
   });
 
-  app.get("/api/admin/stats", (req, res) => {
-    const event = getActiveEvent();
+  app.get("/api/admin/stats", adminMiddleware, (req: any, res) => {
+    const orgId = req.orgId;
+    const event = getActiveEvent(orgId);
     if (!event) {
       return res.status(404).json({ error: "Nenhum evento ativo encontrado" });
     }
-    const totalArrecadado = db.prepare("SELECT COALESCE(SUM(valor), 0) as total FROM pagamentos WHERE evento_id = ? AND status = 'concluido'").get(event.id) as any;
-    const totalEsperadoResult = db.prepare("SELECT COALESCE(SUM(COALESCE(valor_total, ?)), 0) as total FROM usuarios WHERE role = 'guest' AND status = 'ativo' AND (rsvp_status IS NULL OR rsvp_status != 'desistente')").get(event.valor_por_pessoa) as any;
+    const totalArrecadado = db.prepare("SELECT COALESCE(SUM(valor), 0) as total FROM pagamentos WHERE evento_id = ? AND status = 'concluido' AND organization_id = ?").get(event.id, orgId) as any;
+    const totalEsperadoResult = db.prepare("SELECT COALESCE(SUM(COALESCE(valor_total, ?)), 0) as total FROM usuarios WHERE role = 'guest' AND status = 'ativo' AND organization_id = ?").get(event.valor_por_pessoa, orgId) as any;
     const totalEsperado = totalEsperadoResult?.total || 0;
 
     // RSVP Confirmed Stats
-    const confirmedCount = getCurrentOccupancy();
+    const confirmedCount = getCurrentOccupancy(orgId);
 
-    const totalGuests = db.prepare("SELECT COUNT(*) as count FROM usuarios WHERE role = 'guest'").get() as any;
-    const totalCompanions = db.prepare("SELECT COUNT(*) as count FROM acompanhantes").get() as any;
+    const totalGuests = db.prepare("SELECT COUNT(*) as count FROM usuarios WHERE role = 'guest' AND organization_id = ?").get(orgId) as any;
+    const totalCompanions = db.prepare("SELECT COUNT(*) as count FROM acompanhantes WHERE organization_id = ?").get(orgId) as any;
     const totalRequests = (totalGuests?.count || 0) + (totalCompanions?.count || 0);
 
-    const totalCustos = db.prepare("SELECT COALESCE(SUM(total), 0) as total FROM custos WHERE evento_id = ?").get(event.id) as any;
-    const custos = db.prepare("SELECT * FROM custos WHERE evento_id = ?").all(event.id);
+    const totalCustos = db.prepare("SELECT COALESCE(SUM(total), 0) as total FROM custos WHERE evento_id = ? AND organization_id = ?").get(event.id, orgId) as any;
+    const custos = db.prepare("SELECT * FROM custos WHERE evento_id = ? AND organization_id = ?").all(event.id, orgId);
 
-    const totalVendasExtras = db.prepare("SELECT COALESCE(SUM(valor), 0) as total FROM vendas_extras WHERE evento_id = ?").get(event.id) as any;
-    const vendasExtras = db.prepare("SELECT * FROM vendas_extras WHERE evento_id = ?").all(event.id);
+    const totalVendasExtras = db.prepare("SELECT COALESCE(SUM(valor), 0) as total FROM vendas_extras WHERE evento_id = ? AND organization_id = ?").get(event.id, orgId) as any;
+    const vendasExtras = db.prepare("SELECT * FROM vendas_extras WHERE evento_id = ? AND organization_id = ?").all(event.id, orgId);
 
     const guests = db.prepare(`
       SELECT 
         u.*, 
         COALESCE(SUM(CASE WHEN p.status = 'concluido' THEN p.valor ELSE 0 END), 0) as paid,
-        (SELECT COUNT(*) FROM acompanhantes WHERE usuario_id = u.id) as companion_count
+        (SELECT COUNT(*) FROM acompanhantes WHERE usuario_id = u.id AND organization_id = ?) as companion_count
       FROM usuarios u 
-      LEFT JOIN pagamentos p ON u.id = p.usuario_id AND p.evento_id = ?
-      WHERE u.role = 'guest'
+      LEFT JOIN pagamentos p ON u.id = p.usuario_id AND p.evento_id = ? AND p.organization_id = ?
+      WHERE u.role = 'guest' AND u.organization_id = ?
       GROUP BY u.id
-    `).all(event.id);
+    `).all(orgId, event.id, orgId, orgId);
 
     res.json({
       totalArrecadado: totalArrecadado?.total || 0,
@@ -1819,7 +1944,7 @@ async function startServer() {
       custos,
       capacity: event.capacidade_maxima || 50,
       guests: guests.map((g: any) => {
-        const companions = db.prepare("SELECT id, nome, instagram, status FROM acompanhantes WHERE usuario_id = ?").all(g.id);
+        const companions = db.prepare("SELECT id, nome, instagram, status FROM acompanhantes WHERE usuario_id = ? AND organization_id = ?").all(g.id, orgId);
         return {
           ...g,
           status: g.status || 'ativo',
@@ -1831,26 +1956,27 @@ async function startServer() {
     });
   });
 
-  app.get("/api/admin/costs", (req, res) => {
-    const event = getActiveEvent();
+  app.get("/api/admin/costs", adminMiddleware, (req: any, res) => {
+    const orgId = req.orgId;
+    const event = getActiveEvent(orgId);
     if (!event) return res.status(404).json({ error: "Evento não encontrado" });
-    const costs = db.prepare("SELECT * FROM custos WHERE evento_id = ?").all(event.id);
+    const costs = db.prepare("SELECT * FROM custos WHERE evento_id = ? AND organization_id = ?").all(event.id, orgId);
     res.json(costs);
   });
 
-  app.post("/api/admin/costs", (req, res) => {
+  app.post("/api/admin/costs", adminMiddleware, (req: any, res) => {
     const { costs } = req.body; // Array of costs
-    const event = getActiveEvent();
+    const orgId = req.orgId;
+    const event = getActiveEvent(orgId);
     if (!event) return res.status(404).json({ error: "Evento não encontrado" });
 
     try {
       db.transaction(() => {
         // Simple approach: delete all and re-insert for bulk update
-        // Or we could do a more sophisticated sync. For now, let's do bulk sync.
-        db.prepare("DELETE FROM custos WHERE evento_id = ?").run(event.id);
+        db.prepare("DELETE FROM custos WHERE evento_id = ? AND organization_id = ?").run(event.id, orgId);
         const insert = db.prepare(`
-          INSERT INTO custos (evento_id, descricao, quantidade, unidade, valor_unitario, total, categoria)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO custos (evento_id, descricao, quantidade, unidade, valor_unitario, total, categoria, organization_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `);
         for (const cost of costs) {
           insert.run(
@@ -1860,7 +1986,8 @@ async function startServer() {
             cost.unidade || "",
             cost.valor_unitario || 0,
             (cost.quantidade || 1) * (cost.valor_unitario || 0),
-            cost.categoria || "Geral"
+            cost.categoria || "Geral",
+            orgId
           );
         }
       })();
@@ -1870,16 +1997,17 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/sales", (req, res) => {
+  app.post("/api/admin/sales", adminMiddleware, (req: any, res) => {
     const { sales } = req.body; // Array of sales
-    const event = getActiveEvent();
+    const orgId = req.orgId;
+    const event = getActiveEvent(orgId);
     if (!event) return res.status(404).json({ error: "Evento não encontrado" });
 
     try {
       db.transaction(() => {
-        db.prepare("DELETE FROM vendas_extras WHERE evento_id = ?").run(event.id);
+        db.prepare("DELETE FROM vendas_extras WHERE evento_id = ? AND organization_id = ?").run(event.id, orgId);
         const insert = db.prepare(`
-          INSERT INTO vendas_extras (evento_id, descricao, valor, categoria)
+          INSERT INTO vendas_extras (evento_id, descricao, valor, organization_id)
           VALUES (?, ?, ?, ?)
         `);
         for (const sale of sales) {
@@ -1887,7 +2015,7 @@ async function startServer() {
             event.id,
             sale.descricao,
             sale.valor || 0,
-            sale.categoria || "Outros"
+            orgId
           );
         }
       })();
@@ -1897,20 +2025,22 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/approve-guest", (req, res) => {
-    const { guestId, adminId, adminName } = req.body;
+  app.post("/api/admin/approve-guest", adminMiddleware, (req: any, res) => {
+    const { guestId } = req.body;
+    const orgId = req.orgId;
     try {
-      const guest = db.prepare("SELECT * FROM usuarios WHERE id = ?").get(guestId) as any;
+      const guest = db.prepare("SELECT * FROM usuarios WHERE id = ? AND organization_id = ?").get(guestId, orgId) as any;
       if (!guest) return res.status(404).json({ error: "Convidado não encontrado" });
 
-      db.prepare("UPDATE usuarios SET status = 'ativo' WHERE id = ?").run(guestId);
+      db.prepare("UPDATE usuarios SET status = 'ativo' WHERE id = ? AND organization_id = ?").run(guestId, orgId);
       
-      addLog(adminId, adminName, 'Aprovação de Convidado', `O administrador ${adminName} aprovou o cadastro de ${guest.nome}.`);
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
+      addLog(orgId, admin?.id || null, admin?.nome || 'Adm', 'Aprovação de Convidado', `O administrador ${admin?.nome} aprovou o cadastro de ${guest.nome}.`);
       
       // Email Trigger: Guest Approved
-      const event = getActiveEvent();
+      const event = getActiveEvent(orgId);
       if (guest && guest.email && event) {
-        const template = getTemplate('email_approval_guest');
+        const template = getTemplate(orgId, 'email_approval_guest');
         const emailContent = parseTemplate(template, {
           tipo: 'email_approval_guest',
           nome: guest.nome,
@@ -1922,7 +2052,7 @@ async function startServer() {
           system_url: event.system_url || process.env.APP_URL || "http://localhost:3000"
         });
         sendEmail(guest.email, `Cadastro Aprovado! - ${event.nome}`, emailTemplate(emailContent, event)).then(success => {
-          if (success) addLog(guest.id, guest.nome, 'E-mail Enviado', `E-mail de aprovação enviado para ${guest.email}.`);
+          if (success) addLog(orgId, guest.id, guest.nome, 'E-mail Enviado', `E-mail de aprovação enviado para ${guest.email}.`);
         });
       }
 
@@ -1932,20 +2062,22 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/reject-guest", (req, res) => {
-    const { guestId, adminId, adminName } = req.body;
-    console.log(`REJECT GUEST REQUEST: guestId=${guestId}, adminId=${adminId}`);
+  app.post("/api/admin/reject-guest", adminMiddleware, (req: any, res) => {
+    const { guestId } = req.body;
+    const orgId = req.orgId;
+    console.log(`REJECT GUEST REQUEST: guestId=${guestId}`);
     try {
-      const guest = db.prepare("SELECT nome FROM usuarios WHERE id = ?").get(guestId) as any;
+      const guest = db.prepare("SELECT nome FROM usuarios WHERE id = ? AND organization_id = ?").get(guestId, orgId) as any;
       if (!guest) {
         console.log(`Guest not found for rejection: ${guestId}`);
         return res.status(404).json({ error: "Convidado não encontrado" });
       }
 
       // Just update status to 'recusado'
-      db.prepare("UPDATE usuarios SET status = 'recusado' WHERE id = ?").run(guestId);
+      db.prepare("UPDATE usuarios SET status = 'recusado' WHERE id = ? AND organization_id = ?").run(guestId, orgId);
       
-      addLog(adminId, adminName, 'Recusa de Convidado', `O administrador ${adminName} recusou o cadastro de ${guest.nome}.`);
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
+      addLog(orgId, admin?.id || null, admin?.nome || 'Adm', 'Recusa de Convidado', `O administrador ${admin?.nome} recusou o cadastro de ${guest.nome}.`);
       
       res.json({ success: true });
     } catch (error: any) {
@@ -1954,35 +2086,36 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/reactivate-guest", (req, res) => {
-    const { guestId, adminId, adminName } = req.body;
+  app.post("/api/admin/reactivate-guest", adminMiddleware, (req: any, res) => {
+    const { guestId } = req.body;
+    const orgId = req.orgId;
     try {
-      const guest = db.prepare("SELECT nome FROM usuarios WHERE id = ?").get(guestId) as any;
+      const guest = db.prepare("SELECT nome FROM usuarios WHERE id = ? AND organization_id = ?").get(guestId, orgId) as any;
       if (!guest) return res.status(404).json({ error: "Convidado não encontrado" });
 
-      db.prepare("UPDATE usuarios SET status = 'ativo' WHERE id = ?").run(guestId);
-      addLog(adminId, adminName, 'Reativação de Convidado', `O administrador ${adminName} reativou o cadastro de ${guest.nome}.`);
+      db.prepare("UPDATE usuarios SET status = 'ativo' WHERE id = ? AND organization_id = ?").run(guestId, orgId);
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
+      addLog(orgId, admin?.id || null, admin?.nome || 'Adm', 'Reativação de Convidado', `O administrador ${admin?.nome} reativou o cadastro de ${guest.nome}.`);
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
 
-  app.delete("/api/admin/guests/:id", (req, res) => {
+  app.delete("/api/admin/guests/:id", adminMiddleware, (req: any, res) => {
     const { id } = req.params;
-    const { adminId, adminName } = req.query;
+    const orgId = req.orgId;
     try {
-      const guest = db.prepare("SELECT nome FROM usuarios WHERE id = ?").get(id) as any;
+      const guest = db.prepare("SELECT nome FROM usuarios WHERE id = ? AND organization_id = ?").get(id, orgId) as any;
       if (!guest) return res.status(404).json({ error: "Convidado não encontrado" });
 
-      db.prepare("DELETE FROM pagamentos WHERE usuario_id = ?").run(id);
-      db.prepare("DELETE FROM acompanhantes WHERE usuario_id = ?").run(id);
-      db.prepare("DELETE FROM logs_atividades WHERE usuario_id = ?").run(id);
-      db.prepare("DELETE FROM usuarios WHERE id = ?").run(id);
+      db.prepare("DELETE FROM pagamentos WHERE usuario_id = ? AND organization_id = ?").run(id, orgId);
+      db.prepare("DELETE FROM acompanhantes WHERE usuario_id = ? AND organization_id = ?").run(id, orgId);
+      db.prepare("DELETE FROM logs_atividades WHERE usuario_id = ? AND organization_id = ?").run(id, orgId);
+      db.prepare("DELETE FROM usuarios WHERE id = ? AND organization_id = ?").run(id, orgId);
       
-      if (adminId && adminName) {
-        addLog(Number(adminId), String(adminName), 'Exclusão Permanente', `O administrador ${adminName} excluiu permanentemente o cadastro de ${guest.nome}.`);
-      }
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
+      addLog(orgId, admin?.id || null, admin?.nome || 'Adm', 'Exclusão Permanente', `O administrador ${admin?.nome} excluiu permanentemente o cadastro de ${guest.nome}.`);
       
       res.json({ success: true });
     } catch (error: any) {
@@ -1991,18 +2124,18 @@ async function startServer() {
   });
 
   // Maintenance / Backup Routes
-  app.get("/api/admin/backups", (req, res) => {
-    if ((req.session as any).userRole !== 'admin') return res.status(403).json({ error: "Acesso negado" });
-    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ?").get((req.session as any).userId) as any;
+  app.get("/api/admin/backups", adminMiddleware, (req: any, res) => {
+    const orgId = req.orgId;
+    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
     if (!user || user.is_master !== 1) return res.status(403).json({ error: "Acesso negado" });
 
-    const backups = db.prepare("SELECT id, data_hora, nome FROM backups ORDER BY data_hora DESC").all();
+    const backups = db.prepare("SELECT id, data_hora, nome FROM backups WHERE organization_id = ? ORDER BY data_hora DESC").all(orgId);
     res.json(backups);
   });
 
-  app.post("/api/admin/backups", (req, res) => {
-    if ((req.session as any).userRole !== 'admin') return res.status(403).json({ error: "Acesso negado" });
-    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ?").get((req.session as any).userId) as any;
+  app.post("/api/admin/backups", adminMiddleware, (req: any, res) => {
+    const orgId = req.orgId;
+    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
     if (!user || user.is_master !== 1) return res.status(403).json({ error: "Acesso negado" });
 
     const { nome } = req.body;
@@ -2011,11 +2144,11 @@ async function startServer() {
       const tables = ['eventos', 'usuarios', 'pagamentos', 'acompanhantes', 'templates', 'logs_atividades', 'custos', 'vendas_extras'];
       const data: any = {};
       for (const table of tables) {
-        data[table] = db.prepare(`SELECT * FROM ${table}`).all();
+        data[table] = db.prepare(`SELECT * FROM ${table} WHERE organization_id = ?`).all(orgId);
       }
       
       const conteudo = JSON.stringify(data);
-      db.prepare("INSERT INTO backups (nome, conteudo) VALUES (?, ?)").run(nome || `Backup ${new Date().toLocaleString()}`, conteudo);
+      db.prepare("INSERT INTO backups (nome, conteudo, organization_id) VALUES (?, ?, ?)").run(nome || `Backup ${new Date().toLocaleString()}`, conteudo, orgId);
       
       res.json({ success: true });
     } catch (error) {
@@ -2024,12 +2157,12 @@ async function startServer() {
     }
   });
 
-  app.get("/api/admin/backups/:id/download", (req, res) => {
-    if ((req.session as any).userRole !== 'admin') return res.status(403).json({ error: "Acesso negado" });
-    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ?").get((req.session as any).userId) as any;
+  app.get("/api/admin/backups/:id/download", adminMiddleware, (req: any, res) => {
+    const orgId = req.orgId;
+    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
     if (!user || user.is_master !== 1) return res.status(403).json({ error: "Acesso negado" });
 
-    const backup = db.prepare("SELECT * FROM backups WHERE id = ?").get(req.params.id) as any;
+    const backup = db.prepare("SELECT * FROM backups WHERE id = ? AND organization_id = ?").get(req.params.id, orgId) as any;
     if (!backup) return res.status(404).json({ error: "Backup não encontrado" });
     
     res.setHeader('Content-Type', 'application/json');
@@ -2037,17 +2170,17 @@ async function startServer() {
     res.send(backup.conteudo);
   });
 
-  app.post("/api/admin/backups/:id/restore", (req, res) => {
-    if ((req.session as any).userRole !== 'admin') return res.status(403).json({ error: "Acesso negado" });
-    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ?").get((req.session as any).userId) as any;
+  app.post("/api/admin/backups/:id/restore", adminMiddleware, (req: any, res) => {
+    const orgId = req.orgId;
+    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
     if (!user || user.is_master !== 1) return res.status(403).json({ error: "Acesso negado" });
 
-    const backup = db.prepare("SELECT * FROM backups WHERE id = ?").get(req.params.id) as any;
+    const backup = db.prepare("SELECT * FROM backups WHERE id = ? AND organization_id = ?").get(req.params.id, orgId) as any;
     if (!backup) return res.status(404).json({ error: "Backup não encontrado" });
     
     try {
       const data = JSON.parse(backup.conteudo);
-      restoreData(data);
+      restoreData(orgId, data);
       res.json({ success: true });
     } catch (error) {
       console.error("Error restoring backup:", error);
@@ -2055,23 +2188,23 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/admin/backups/:id", (req, res) => {
-    if ((req.session as any).userRole !== 'admin') return res.status(403).json({ error: "Acesso negado" });
-    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ?").get((req.session as any).userId) as any;
+  app.delete("/api/admin/backups/:id", adminMiddleware, (req: any, res) => {
+    const orgId = req.orgId;
+    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
     if (!user || user.is_master !== 1) return res.status(403).json({ error: "Acesso negado" });
 
-    db.prepare("DELETE FROM backups WHERE id = ?").run(req.params.id);
+    db.prepare("DELETE FROM backups WHERE id = ? AND organization_id = ?").run(req.params.id, orgId);
     res.json({ success: true });
   });
 
-  app.post("/api/admin/backups/import", express.json({ limit: '50mb' }), (req, res) => {
-    if ((req.session as any).userRole !== 'admin') return res.status(403).json({ error: "Acesso negado" });
-    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ?").get((req.session as any).userId) as any;
+  app.post("/api/admin/backups/import", adminMiddleware, express.json({ limit: '50mb' }), (req: any, res) => {
+    const orgId = req.orgId;
+    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
     if (!user || user.is_master !== 1) return res.status(403).json({ error: "Acesso negado" });
 
     const { data } = req.body;
     try {
-      restoreData(data);
+      restoreData(orgId, data);
       res.json({ success: true });
     } catch (error) {
       console.error("Error importing backup:", error);
@@ -2079,9 +2212,9 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/maintenance/cleanup", (req, res) => {
-    if ((req.session as any).userRole !== 'admin') return res.status(403).json({ error: "Acesso negado" });
-    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ?").get((req.session as any).userId) as any;
+  app.post("/api/admin/maintenance/cleanup", adminMiddleware, (req: any, res) => {
+    const orgId = req.orgId;
+    const user = db.prepare("SELECT is_master FROM usuarios WHERE id = ? AND organization_id = ?").get(req.userId, orgId) as any;
     if (!user || user.is_master !== 1) return res.status(403).json({ error: "Acesso negado" });
 
     const { type } = req.body;
@@ -2090,32 +2223,32 @@ async function startServer() {
       db.transaction(() => {
         switch (type) {
           case 'financial':
-            db.prepare("DELETE FROM pagamentos").run();
-            db.prepare("DELETE FROM custos").run();
-            db.prepare("DELETE FROM vendas_extras").run();
-            db.prepare("UPDATE usuarios SET valor_total = 0").run();
+            db.prepare("DELETE FROM pagamentos WHERE organization_id = ?").run(orgId);
+            db.prepare("DELETE FROM custos WHERE organization_id = ?").run(orgId);
+            db.prepare("DELETE FROM vendas_extras WHERE organization_id = ?").run(orgId);
+            db.prepare("UPDATE usuarios SET valor_total = 0 WHERE organization_id = ?").run(orgId);
             break;
           case 'guests_all':
-            db.prepare("DELETE FROM acompanhantes").run();
-            db.prepare("DELETE FROM pagamentos").run();
-            db.prepare("DELETE FROM usuarios WHERE is_master = 0 AND role != 'admin'").run();
+            db.prepare("DELETE FROM acompanhantes WHERE organization_id = ?").run(orgId);
+            db.prepare("DELETE FROM pagamentos WHERE organization_id = ?").run(orgId);
+            db.prepare("DELETE FROM usuarios WHERE is_master = 0 AND role != 'admin' AND organization_id = ?").run(orgId);
             break;
           case 'companions_only':
-            db.prepare("DELETE FROM acompanhantes").run();
+            db.prepare("DELETE FROM acompanhantes WHERE organization_id = ?").run(orgId);
             break;
           case 'unapproved_only':
-            db.prepare("DELETE FROM acompanhantes WHERE status = 'pendente_aprovacao'").run();
-            db.prepare("DELETE FROM usuarios WHERE status IN ('pendente', 'recusado') AND is_master = 0 AND role != 'admin'").run();
+            db.prepare("DELETE FROM acompanhantes WHERE status = 'pendente_aprovacao' AND organization_id = ?").run(orgId);
+            db.prepare("DELETE FROM usuarios WHERE status IN ('pendente', 'recusado') AND is_master = 0 AND role != 'admin' AND organization_id = ?").run(orgId);
             break;
           case 'status_unapproved':
-            db.prepare("UPDATE usuarios SET status = 'pendente' WHERE is_master = 0 AND role != 'admin'").run();
-            db.prepare("UPDATE acompanhantes SET status = 'pendente_aprovacao'").run();
+            db.prepare("UPDATE usuarios SET status = 'pendente' WHERE is_master = 0 AND role != 'admin' AND organization_id = ?").run(orgId);
+            db.prepare("UPDATE acompanhantes SET status = 'pendente_aprovacao' WHERE organization_id = ?").run(orgId);
             break;
           case 'status_unconfirmed':
-            db.prepare("UPDATE usuarios SET confirmado = 0 WHERE is_master = 0 AND role != 'admin'").run();
+            db.prepare("UPDATE usuarios SET confirmado = 0 WHERE is_master = 0 AND role != 'admin' AND organization_id = ?").run(orgId);
             break;
           case 'logs':
-            db.prepare("DELETE FROM logs_atividades").run();
+            db.prepare("DELETE FROM logs_atividades WHERE organization_id = ?").run(orgId);
             break;
           case 'reset_event':
             db.prepare(`
@@ -2126,7 +2259,8 @@ async function startServer() {
                 capacidade_maxima = 50, 
                 prazo_rsvp = NULL,
                 info_texto = NULL
-            `).run();
+              WHERE organization_id = ?
+            `).run(orgId);
             break;
           default:
             throw new Error("Tipo de limpeza inválido");
@@ -2140,13 +2274,13 @@ async function startServer() {
     }
   });
 
-  function restoreData(data: any) {
+  function restoreData(orgId: number, data: any) {
     const tables = ['eventos', 'usuarios', 'pagamentos', 'acompanhantes', 'templates', 'logs_atividades', 'custos', 'vendas_extras'];
     
     db.transaction(() => {
       for (const table of tables) {
         if (data[table]) {
-          db.prepare(`DELETE FROM ${table}`).run();
+          db.prepare(`DELETE FROM ${table} WHERE organization_id = ?`).run(orgId);
           const rows = data[table];
           if (rows.length > 0) {
             const columns = Object.keys(rows[0]);
@@ -2161,9 +2295,10 @@ async function startServer() {
     })();
   }
 
-  app.get("/api/admin/config", (req, res) => {
-    const event = getActiveEvent();
-    const admin = db.prepare("SELECT id, nome, email, whatsapp FROM usuarios WHERE is_master = 1 LIMIT 1").get() as any;
+  app.get("/api/admin/config", adminMiddleware, (req: any, res) => {
+    const orgId = req.orgId;
+    const event = getActiveEvent(orgId);
+    const admin = db.prepare("SELECT id, nome, email, whatsapp FROM usuarios WHERE is_master = 1 AND organization_id = ? LIMIT 1").get(orgId) as any;
     
     if (!event || !admin) return res.status(404).json({ error: "Configurações não encontradas" });
     
@@ -2202,16 +2337,18 @@ async function startServer() {
     });
   });
 
-  app.post("/api/admin/config", (req, res) => {
+  app.post("/api/admin/config", adminMiddleware, (req: any, res) => {
     const { event, organizador } = req.body;
+    const orgId = req.orgId;
 
     if (!validatePhone(organizador.whatsapp)) {
       return res.status(400).json({ error: "Por favor, informe um número de WhatsApp válido para o organizador." });
     }
 
     console.log("Receiving config update:", { event, organizador });
-    const activeEvent = getActiveEvent();
-    const admin = db.prepare("SELECT id FROM usuarios WHERE is_master = 1 LIMIT 1").get() as any;
+    const activeEvent = getActiveEvent(orgId);
+    if (!activeEvent) return res.status(404).json({ error: "Evento não encontrado" });
+    const admin = db.prepare("SELECT id FROM usuarios WHERE is_master = 1 AND organization_id = ? LIMIT 1").get(orgId) as any;
 
     const flyerLanding = saveBase64Image(event.flyer_landing, 'flyer_landing');
     const flyerLandingMobile = saveBase64Image(event.flyer_landing_mobile, 'flyer_landing_mobile');
@@ -2246,7 +2383,7 @@ async function startServer() {
             admin2_email = ?,
             admin3_email = ?,
             ativo = ?
-          WHERE id = ?
+          WHERE id = ? AND organization_id = ?
         `).run(
           event.nome, 
           event.local, 
@@ -2272,7 +2409,8 @@ async function startServer() {
           event.admin2_email,
           event.admin3_email,
           event.ativo === false ? 0 : 1,
-          activeEvent.id
+          activeEvent.id,
+          orgId
         );
 
         // Update roles for secondary admins
@@ -2282,27 +2420,27 @@ async function startServer() {
         ].filter(c => c.email);
         
         // Reset old secondary admins to guest (if they are not master)
-        db.prepare("UPDATE usuarios SET role = 'guest' WHERE role = 'admin' AND is_master = 0").run();
+        db.prepare("UPDATE usuarios SET role = 'guest' WHERE role = 'admin' AND is_master = 0 AND organization_id = ?").run(orgId);
         
         // Set new secondary admins
         for (const config of adminConfigs) {
-          const existing = db.prepare("SELECT id FROM usuarios WHERE LOWER(email) = LOWER(?)").get(config.email) as any;
+          const existing = db.prepare("SELECT id FROM usuarios WHERE LOWER(email) = LOWER(?) AND organization_id = ?").get(config.email, orgId) as any;
           
           if (existing) {
             // Update existing user
             if (config.password) {
               const hash = bcrypt.hashSync(config.password, 10);
-              db.prepare("UPDATE usuarios SET role = 'admin', senha_hash = ? WHERE id = ? AND is_master = 0").run(hash, existing.id);
+              db.prepare("UPDATE usuarios SET role = 'admin', senha_hash = ? WHERE id = ? AND is_master = 0 AND organization_id = ?").run(hash, existing.id, orgId);
             } else {
-              db.prepare("UPDATE usuarios SET role = 'admin' WHERE id = ? AND is_master = 0").run(existing.id);
+              db.prepare("UPDATE usuarios SET role = 'admin' WHERE id = ? AND is_master = 0 AND organization_id = ?").run(existing.id, orgId);
             }
           } else if (config.password) {
             // Create new admin user if password provided
             const hash = bcrypt.hashSync(config.password, 10);
             db.prepare(`
-              INSERT INTO usuarios (nome, email, senha_hash, role, status, is_master) 
-              VALUES (?, ?, ?, 'admin', 'ativo', 0)
-            `).run(config.email.split('@')[0], config.email, hash);
+              INSERT INTO usuarios (nome, email, senha_hash, role, status, is_master, organization_id) 
+              VALUES (?, ?, ?, 'admin', 'ativo', 0, ?)
+            `).run(config.email.split('@')[0], config.email, hash, orgId);
           }
         }
 
@@ -2311,12 +2449,12 @@ async function startServer() {
             nome = ?, 
             email = ?, 
             whatsapp = ? 
-          WHERE id = ?
-        `).run(organizador.nome, organizador.email, organizador.whatsapp, admin.id);
+          WHERE id = ? AND organization_id = ?
+        `).run(organizador.nome, organizador.email, organizador.whatsapp, admin.id, orgId);
       })();
       
       saveSettingsBackup();
-      addLog(admin.id, organizador.nome, 'Configuração', `Adm ${organizador.nome} atualizou as configurações do evento e/ou flyers.`);
+      addLog(orgId, admin.id, organizador.nome, 'Configuração', `Adm ${organizador.nome} atualizou as configurações do evento e/ou flyers.`);
       
       res.json({ success: true });
     } catch (error: any) {
@@ -2324,12 +2462,11 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/test-email", async (req, res) => {
+  app.post("/api/admin/test-email", adminMiddleware, async (req: any, res) => {
     const { email, config } = req.body;
-    const event = getActiveEvent();
-    
-    // Temporarily update DB to test with provided config
-    // Actually, it's better to just use the provided config directly in a test function
+    const orgId = req.orgId;
+    const event = getActiveEvent(orgId);
+    if (!event) return res.status(404).json({ error: "Evento não encontrado" });
     
     try {
       const method = config.email_method || 'smtp';
@@ -2396,15 +2533,12 @@ async function startServer() {
     }
   });
 
-  app.post("/api/user/change-password", (req, res) => {
+  app.post("/api/user/change-password", authMiddleware, (req: any, res) => {
     const { currentPassword, newPassword } = req.body;
-    const userId = (req.session as any).userId;
+    const userId = req.userId;
+    const orgId = req.orgId;
 
-    if (!userId) {
-      return res.status(401).json({ error: "Sessão expirada. Faça login novamente." });
-    }
-
-    const user = db.prepare("SELECT id, senha_hash FROM usuarios WHERE id = ?").get(userId) as any;
+    const user = db.prepare("SELECT id, senha_hash FROM usuarios WHERE id = ? AND organization_id = ?").get(userId, orgId) as any;
 
     if (!user) {
       return res.status(404).json({ error: "Usuário não encontrado." });
@@ -2424,7 +2558,7 @@ async function startServer() {
 
     try {
       const hashedNewPassword = bcrypt.hashSync(newPassword, 10);
-      db.prepare("UPDATE usuarios SET senha_hash = ? WHERE id = ?").run(hashedNewPassword, user.id);
+      db.prepare("UPDATE usuarios SET senha_hash = ? WHERE id = ? AND organization_id = ?").run(hashedNewPassword, user.id, orgId);
       res.json({ success: true });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -2432,15 +2566,12 @@ async function startServer() {
   });
 
   // Keep old endpoint for backward compatibility but use the new logic
-  app.post("/api/admin/change-password", (req, res) => {
+  app.post("/api/admin/change-password", adminMiddleware, (req: any, res) => {
     const { currentPassword, newPassword } = req.body;
-    const userId = (req.session as any).userId;
+    const userId = req.userId;
+    const orgId = req.orgId;
 
-    if (!userId) {
-      return res.status(401).json({ error: "Sessão expirada. Faça login novamente." });
-    }
-
-    const user = db.prepare("SELECT id, senha_hash, is_master FROM usuarios WHERE id = ?").get(userId) as any;
+    const user = db.prepare("SELECT id, senha_hash, is_master FROM usuarios WHERE id = ? AND organization_id = ?").get(userId, orgId) as any;
 
     if (!user || user.is_master !== 1) {
       return res.status(403).json({ error: "Apenas o administrador master pode alterar a senha principal." });
@@ -2460,55 +2591,59 @@ async function startServer() {
 
     try {
       const hashedNewPassword = bcrypt.hashSync(newPassword, 10);
-      db.prepare("UPDATE usuarios SET senha_hash = ? WHERE id = ?").run(hashedNewPassword, user.id);
+      db.prepare("UPDATE usuarios SET senha_hash = ? WHERE id = ? AND organization_id = ?").run(hashedNewPassword, user.id, orgId);
       res.json({ success: true });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
   });
 
-  app.post("/api/admin/config/pix", (req, res) => {
+  app.post("/api/admin/config/pix", adminMiddleware, (req: any, res) => {
     const { pixKey } = req.body;
-    const event = getActiveEvent();
+    const orgId = req.orgId;
+    const event = getActiveEvent(orgId);
     if (!event) return res.status(404).json({ error: "Evento não encontrado" });
     
     try {
-      db.prepare("UPDATE eventos SET pix_key = ? WHERE id = ?").run(pixKey, event.id);
+      db.prepare("UPDATE eventos SET pix_key = ? WHERE id = ? AND organization_id = ?").run(pixKey, event.id, orgId);
       res.json({ success: true });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
   });
 
-  app.get("/api/admin/templates", (req, res) => {
-    const templates = db.prepare("SELECT * FROM templates").all();
+  app.get("/api/admin/templates", adminMiddleware, (req: any, res) => {
+    const orgId = req.orgId;
+    const templates = db.prepare("SELECT * FROM templates WHERE organization_id = ?").all(orgId);
     res.json(templates);
   });
 
-  app.put("/api/admin/templates", (req, res) => {
+  app.put("/api/admin/templates", adminMiddleware, (req: any, res) => {
     const { templates } = req.body;
+    const orgId = req.orgId;
     if (!Array.isArray(templates)) return res.status(400).json({ error: "Formato inválido" });
 
-    const update = db.prepare("UPDATE templates SET conteudo = ? WHERE tipo = ?");
+    const update = db.prepare("UPDATE templates SET conteudo = ? WHERE tipo = ? AND organization_id = ?");
     const transaction = db.transaction((templatesToUpdate) => {
       for (const t of templatesToUpdate) {
-        update.run(t.conteudo, t.tipo);
+        update.run(t.conteudo, t.tipo, orgId);
       }
     });
 
     try {
       transaction(templates);
-      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' LIMIT 1").get() as any;
-      addLog(admin?.id || null, admin?.nome || 'Adm', 'Templates', `Adm ${admin?.nome} atualizou os templates de mensagens.`);
+      const admin = db.prepare("SELECT id, nome FROM usuarios WHERE role = 'admin' AND organization_id = ? LIMIT 1").get(orgId) as any;
+      addLog(orgId, admin?.id || null, admin?.nome || 'Adm', 'Templates', `Adm ${admin?.nome} atualizou os templates de mensagens.`);
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
 
-  app.post("/api/admin/send-custom-email", async (req, res) => {
+  app.post("/api/admin/send-custom-email", adminMiddleware, async (req: any, res) => {
     const { userId, email, subject, message } = req.body;
-    const event = getActiveEvent();
+    const orgId = req.orgId;
+    const event = getActiveEvent(orgId);
     
     if (!event) return res.status(404).json({ error: "Evento não encontrado" });
     if (!email || !message) return res.status(400).json({ error: "E-mail e mensagem são obrigatórios" });
@@ -2521,8 +2656,8 @@ async function startServer() {
       
       if (success) {
         if (userId) {
-          const user = db.prepare("SELECT nome FROM usuarios WHERE id = ?").get(userId) as any;
-          addLog(userId, user?.nome || 'Usuário', 'Informativo Enviado', `Informativo enviado por e-mail: ${subject}`);
+          const user = db.prepare("SELECT nome FROM usuarios WHERE id = ? AND organization_id = ?").get(userId, orgId) as any;
+          addLog(orgId, userId, user?.nome || 'Usuário', 'Informativo Enviado', `Informativo enviado por e-mail: ${subject}`);
         }
         res.json({ success: true });
       } else {
@@ -2534,9 +2669,10 @@ async function startServer() {
     }
   });
 
-  app.get("/api/admin/logs", (req, res) => {
+  app.get("/api/admin/logs", adminMiddleware, (req: any, res) => {
+    const orgId = req.orgId;
     try {
-      const logs = db.prepare("SELECT * FROM logs_atividades ORDER BY data_hora DESC").all();
+      const logs = db.prepare("SELECT * FROM logs_atividades WHERE organization_id = ? ORDER BY data_hora DESC").all(orgId);
       res.json(logs);
     } catch (error: any) {
       res.status(500).json({ error: error.message });

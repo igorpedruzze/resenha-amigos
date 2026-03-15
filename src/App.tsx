@@ -23,6 +23,7 @@ import {
   TrendingUp, 
   ShoppingBag,
   Users, 
+  UserPlus,
   Filter, 
   Plus,
   QrCode,
@@ -66,6 +67,7 @@ import {
 // Types
 interface UserData {
   id: number;
+  organization_id: number;
   nome: string;
   email: string;
   whatsapp: string;
@@ -624,6 +626,7 @@ export default function App() {
   const [showCompanionForm, setShowCompanionForm] = useState(false);
   const [companionFormData, setCompanionFormData] = useState({ nome: '', instagram: '' });
   const [loading, setLoading] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
   const [loadingData, setLoadingData] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [companionDeleteConfirmId, setCompanionDeleteConfirmId] = useState<number | null>(null);
@@ -751,9 +754,13 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setUser(data);
+        if (data.role === 'admin') setView('admin');
+        else setView('dashboard');
       }
     } catch (error) {
       console.error('Error fetching me:', error);
+    } finally {
+      setIsInitializing(false);
     }
   };
 
@@ -1003,6 +1010,7 @@ export default function App() {
 
   useEffect(() => {
     fetchPublicEvent();
+    fetchMe();
     
     const urlParams = new URLSearchParams(window.location.search);
     
@@ -1038,7 +1046,9 @@ export default function App() {
   }, [user]);
 
   const fetchPublicEvent = async () => {
-    const res = await fetch('/api/public/event');
+    const urlParams = new URLSearchParams(window.location.search);
+    const orgSlug = urlParams.get('org') || 'default';
+    const res = await fetch(`/api/public/event?org=${orgSlug}`);
     if (res.ok) setPublicEvent(await res.json());
   };
 
@@ -1352,6 +1362,9 @@ export default function App() {
     }
 
     try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const orgSlug = urlParams.get('org') || 'default';
+
       const res = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1361,7 +1374,8 @@ export default function App() {
           whatsapp: signupData.whatsapp,
           instagram: signupData.instagram,
           password: signupData.password,
-          companionsCount: signupData.companionsCount
+          companionsCount: signupData.companionsCount,
+          slug: orgSlug
         })
       });
       const data = await res.json();
@@ -3277,6 +3291,52 @@ export default function App() {
                     </div>
                     <div className={`size-12 rounded-full flex items-center justify-center ${adminStats.totalArrecadado + adminStats.totalVendasExtras - adminStats.totalCustos >= 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
                       {adminStats.totalArrecadado + adminStats.totalVendasExtras - adminStats.totalCustos >= 0 ? <CheckCircle className="size-6" /> : <AlertCircle className="size-6" />}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                  <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+                    <div className="flex-1">
+                      <p className="text-slate-500 text-sm font-medium">Ocupação do Evento</p>
+                      <div className="flex items-end gap-2 mt-1">
+                        <h3 className="text-2xl font-black text-slate-900">{adminStats.confirmedCount}</h3>
+                        <span className="text-slate-400 font-bold mb-1">/ {adminStats.capacity} pessoas</span>
+                      </div>
+                      <div className="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden">
+                        <div 
+                          className={`h-full transition-all duration-1000 ${
+                            (adminStats.confirmedCount / adminStats.capacity) > 0.9 ? 'bg-red-500' : 
+                            (adminStats.confirmedCount / adminStats.capacity) > 0.7 ? 'bg-amber-500' : 'bg-blue-600'
+                          }`}
+                          style={{ width: `${Math.min(100, (adminStats.confirmedCount / adminStats.capacity) * 100)}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                    <div className="size-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 ml-4">
+                      <Users className="size-6" />
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+                    <div>
+                      <p className="text-slate-500 text-sm font-medium">Total de Cadastros</p>
+                      <h3 className="text-2xl font-black text-slate-900">{adminStats.totalRequests}</h3>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">Convidados + Acompanhantes</p>
+                    </div>
+                    <div className="size-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
+                      <UserPlus className="size-6" />
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
+                    <div>
+                      <p className="text-slate-500 text-sm font-medium">Receita Esperada</p>
+                      <h3 className="text-2xl font-black text-slate-900">{formatCurrency(adminStats.totalEsperado)}</h3>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">Total se todos pagarem</p>
+                    </div>
+                    <div className="size-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
+                      <TrendingUp className="size-6" />
                     </div>
                   </div>
                 </div>
