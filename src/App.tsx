@@ -204,6 +204,13 @@ interface AdminStats {
   guests: (UserData & { paid: number })[];
   eventValue: number;
   pixKey?: string;
+  plan?: {
+    id: number;
+    name: string;
+    max_guests: number;
+    price: number;
+    status: string;
+  } | null;
 }
 
 interface ActivityLog {
@@ -3555,6 +3562,48 @@ export default function App() {
             )}
             {adminTab === 'stats' && adminStats && (
               <>
+                {/* Plan Usage Card */}
+                {adminStats.plan && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-8"
+                  >
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="flex items-center gap-4">
+                        <div className="bg-emerald-100 p-3 rounded-xl text-emerald-600">
+                          <ShieldCheck className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-bold text-slate-900">Plano Atual: {adminStats.plan.name}</h3>
+                          <p className="text-sm text-slate-500">Seu limite é de {adminStats.plan.max_guests} convidados</p>
+                        </div>
+                      </div>
+                      <div className="flex-1 max-w-md">
+                        <div className="flex justify-between text-sm mb-2">
+                          <span className="font-medium text-slate-700">Uso do Plano</span>
+                          <span className="font-bold text-slate-900">{adminStats.confirmedCount} / {adminStats.plan.max_guests}</span>
+                        </div>
+                        <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full transition-all duration-500 ${
+                              (adminStats.confirmedCount / adminStats.plan.max_guests) > 0.9 ? 'bg-red-500' : 
+                              (adminStats.confirmedCount / adminStats.plan.max_guests) > 0.7 ? 'bg-amber-500' : 'bg-emerald-500'
+                            }`}
+                            style={{ width: `${Math.min(100, (adminStats.confirmedCount / adminStats.plan.max_guests) * 100)}%` }}
+                          />
+                        </div>
+                        {(adminStats.confirmedCount / adminStats.plan.max_guests) > 0.8 && (
+                          <p className="text-xs text-red-600 mt-2 font-medium flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            Você está chegando ao limite! Entre em contato para fazer um upgrade.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                   <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
                     <div className="flex-1">

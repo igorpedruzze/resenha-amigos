@@ -196,7 +196,17 @@ async function startServer() {
       nome TEXT NOT NULL,
       slug TEXT UNIQUE NOT NULL,
       status TEXT DEFAULT 'ativo',
-      data_criacao DATETIME DEFAULT CURRENT_TIMESTAMP
+      plan_id INTEGER,
+      data_criacao DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (plan_id) REFERENCES plans(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS plans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      max_guests INTEGER NOT NULL,
+      price REAL NOT NULL,
+      status TEXT DEFAULT 'ativo'
     );
 
     CREATE TABLE IF NOT EXISTS eventos (
@@ -285,10 +295,24 @@ async function startServer() {
     db.exec("ALTER TABLE backups ADD COLUMN organization_id INTEGER REFERENCES organizations(id)");
   } catch (e) {}
 
+  try {
+    db.exec("ALTER TABLE organizations ADD COLUMN plan_id INTEGER REFERENCES plans(id)");
+  } catch (e) {}
+
+  // Seed Default Plans if none exist
+  const hasPlans = db.prepare("SELECT COUNT(*) as count FROM plans").get() as any;
+  if (hasPlans.count === 0) {
+    db.prepare("INSERT INTO plans (name, max_guests, price) VALUES (?, ?, ?)").run("Plano Bronze", 50, 29.90);
+    db.prepare("INSERT INTO plans (name, max_guests, price) VALUES (?, ?, ?)").run("Plano Prata", 150, 59.90);
+    db.prepare("INSERT INTO plans (name, max_guests, price) VALUES (?, ?, ?)").run("Plano Ouro", 500, 99.90);
+    console.log("Default plans seeded.");
+  }
+
   // Seed Default Organization if none exists
   const hasOrg = db.prepare("SELECT COUNT(*) as count FROM organizations").get() as any;
   if (hasOrg.count === 0) {
-    const result = db.prepare("INSERT INTO organizations (nome, slug) VALUES (?, ?)").run("Minha Organização", "default");
+    const bronzePlan = db.prepare("SELECT id FROM plans WHERE name = 'Plano Bronze'").get() as any;
+    const result = db.prepare("INSERT INTO organizations (nome, slug, plan_id) VALUES (?, ?, ?)").run("Minha Organização", "default", bronzePlan?.id || null);
     const defaultOrgId = result.lastInsertRowid;
     
     // Assign existing data to default organization
@@ -1076,7 +1100,24 @@ async function startServer() {
 
     // Security: Validate capacity before signup
     const currentOccupancy = getCurrentOccupancy(org.id);
-    if (currentOccupancy >= (event.capacidade_maxima || 50)) {
+    const companionsToAdd = parseInt(companionsCount) || 0;
+    const totalAfterSignup = currentOccupancy + 1 + companionsToAdd;
+    
+    // Plan Limit Check
+    const orgWithPlan = db.prepare(`
+      SELECT o.*, p.max_guests 
+      FROM organizations o 
+      LEFT JOIN plans p ON o.plan_id = p.id 
+      WHERE o.id = ?
+    `).get(org.id) as any;
+    
+    if (orgWithPlan && orgWithPlan.max_guests) {
+      if (totalAfterSignup > orgWithPlan.max_guests) {
+        return res.status(400).json({ error: "Este evento atingiu o limite de convidados do plano contratado pelo organizador." });
+      }
+    }
+
+    if (totalAfterSignup > (event.capacidade_maxima || 50)) {
       return res.status(400).json({ error: "Vagas Esgotadas! 🚀 Infelizmente atingimos o limite máximo de convidados." });
     }
 
@@ -2014,6 +2055,13 @@ async function startServer() {
     const totalVendasExtras = db.prepare("SELECT COALESCE(SUM(valor), 0) as total FROM vendas_extras WHERE evento_id = ? AND organization_id = ?").get(event.id, orgId) as any;
     const vendasExtras = db.prepare("SELECT * FROM vendas_extras WHERE evento_id = ? AND organization_id = ?").all(event.id, orgId);
 
+    const orgPlan = db.prepare(`
+      SELECT p.* 
+      FROM organizations o 
+      LEFT JOIN plans p ON o.plan_id = p.id 
+      WHERE o.id = ?
+    `).get(orgId) as any;
+
     const guests = db.prepare(`
       SELECT 
         u.*, 
@@ -2035,6 +2083,7 @@ async function startServer() {
       totalCustos: totalCustos?.total || 0,
       custos,
       capacity: event.capacidade_maxima || 50,
+      plan: orgPlan || null,
       guests: guests.map((g: any) => {
         const companions = db.prepare("SELECT id, nome, instagram, status FROM acompanhantes WHERE usuario_id = ? AND organization_id = ?").all(g.id, orgId);
         return {
@@ -2766,12 +2815,74 @@ async function startServer() {
     try {
       const orgs = db.prepare(`
         SELECT o.*, 
+        p.name as plan_name,
+        p.max_guests as plan_max_guests,
         (SELECT COUNT(*) FROM eventos WHERE organization_id = o.id) as events_count,
-        (SELECT COUNT(*) FROM usuarios WHERE organization_id = o.id AND role = 'guest') as guests_count
+        (
+          (SELECT COUNT(*) FROM usuarios WHERE organization_id = o.id AND role = 'guest' AND status = 'ativo') +
+          (SELECT COUNT(*) FROM acompanhantes WHERE organization_id = o.id AND status = 'aprovado')
+        ) as guests_count
         FROM organizations o
+        LEFT JOIN plans p ON o.plan_id = p.id
         ORDER BY o.data_criacao DESC
       `).all();
       res.json(orgs);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/superadmin/organizations/:id/plan", superAdminMiddleware, (req, res) => {
+    const { id } = req.params;
+    const { planId } = req.body;
+    try {
+      db.prepare("UPDATE organizations SET plan_id = ? WHERE id = ?").run(planId, id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/superadmin/plans", superAdminMiddleware, (req, res) => {
+    try {
+      const plans = db.prepare("SELECT * FROM plans ORDER BY price ASC").all();
+      res.json(plans);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/superadmin/plans", superAdminMiddleware, (req, res) => {
+    const { name, max_guests, price, status } = req.body;
+    try {
+      const result = db.prepare("INSERT INTO plans (name, max_guests, price, status) VALUES (?, ?, ?, ?)").run(name, max_guests, price, status || 'ativo');
+      res.json({ id: result.lastInsertRowid });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/superadmin/plans/:id", superAdminMiddleware, (req, res) => {
+    const { id } = req.params;
+    const { name, max_guests, price, status } = req.body;
+    try {
+      db.prepare("UPDATE plans SET name = ?, max_guests = ?, price = ?, status = ? WHERE id = ?").run(name, max_guests, price, status, id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/superadmin/plans/:id", superAdminMiddleware, (req, res) => {
+    const { id } = req.params;
+    try {
+      // Check if any organization is using this plan
+      const inUse = db.prepare("SELECT COUNT(*) as count FROM organizations WHERE plan_id = ?").get(id) as any;
+      if (inUse.count > 0) {
+        return res.status(400).json({ error: "Este plano não pode ser excluído pois está sendo usado por organizações." });
+      }
+      db.prepare("DELETE FROM plans WHERE id = ?").run(id);
+      res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

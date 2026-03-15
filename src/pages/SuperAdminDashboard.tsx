@@ -13,6 +13,14 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
+interface Plan {
+  id: number;
+  name: string;
+  max_guests: number;
+  price: number;
+  status: 'ativo' | 'inativo';
+}
+
 interface Organization {
   id: number;
   nome: string;
@@ -21,6 +29,9 @@ interface Organization {
   data_criacao: string;
   events_count: number;
   guests_count: number;
+  plan_id: number | null;
+  plan_name: string | null;
+  plan_max_guests: number | null;
 }
 
 interface GlobalStats {
@@ -32,9 +43,16 @@ interface GlobalStats {
 
 export default function SuperAdminDashboard() {
   const [orgs, setOrgs] = useState<Organization[]>([]);
+  const [plans, setPlans] = useState<Plan[]>([]);
   const [stats, setStats] = useState<GlobalStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState<'orgs' | 'plans'>('orgs');
+  
+  // Plan Modal State
+  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
+  const [planForm, setPlanForm] = useState({ name: '', max_guests: 50, price: 0, status: 'ativo' as const });
 
   useEffect(() => {
     fetchData();
@@ -42,16 +60,19 @@ export default function SuperAdminDashboard() {
 
   const fetchData = async () => {
     try {
-      const [orgsRes, statsRes] = await Promise.all([
+      const [orgsRes, statsRes, plansRes] = await Promise.all([
         fetch('/api/superadmin/organizations'),
-        fetch('/api/superadmin/stats')
+        fetch('/api/superadmin/stats'),
+        fetch('/api/superadmin/plans')
       ]);
       
-      if (orgsRes.ok && statsRes.ok) {
+      if (orgsRes.ok && statsRes.ok && plansRes.ok) {
         const orgsData = await orgsRes.json();
         const statsData = await statsRes.json();
+        const plansData = await plansRes.json();
         setOrgs(orgsData);
         setStats(statsData);
+        setPlans(plansData);
       }
     } catch (error) {
       console.error('Error fetching superadmin data:', error);
@@ -78,6 +99,59 @@ export default function SuperAdminDashboard() {
     }
   };
 
+  const updateOrgPlan = async (orgId: number, planId: number) => {
+    try {
+      const res = await fetch(`/api/superadmin/organizations/${orgId}/plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId })
+      });
+      if (res.ok) {
+        fetchData();
+      }
+    } catch (error) {
+      console.error('Error updating org plan:', error);
+    }
+  };
+
+  const handleSavePlan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const url = editingPlan ? `/api/superadmin/plans/${editingPlan.id}` : '/api/superadmin/plans';
+      const method = editingPlan ? 'PUT' : 'POST';
+      
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(planForm)
+      });
+      
+      if (res.ok) {
+        setIsPlanModalOpen(false);
+        setEditingPlan(null);
+        setPlanForm({ name: '', max_guests: 50, price: 0, status: 'ativo' });
+        fetchData();
+      }
+    } catch (error) {
+      console.error('Error saving plan:', error);
+    }
+  };
+
+  const deletePlan = async (id: number) => {
+    if (!confirm('Tem certeza que deseja excluir este plano?')) return;
+    try {
+      const res = await fetch(`/api/superadmin/plans/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (res.ok) {
+        fetchData();
+      } else {
+        alert(data.error);
+      }
+    } catch (error) {
+      console.error('Error deleting plan:', error);
+    }
+  };
+
   const filteredOrgs = orgs.filter(org => 
     org.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
     org.slug.toLowerCase().includes(searchTerm.toLowerCase())
@@ -99,7 +173,7 @@ export default function SuperAdminDashboard() {
             <ShieldCheck className="text-emerald-600" />
             Painel do Dono da Plataforma
           </h1>
-          <p className="text-slate-500">Gerenciamento global de organizações e estatísticas</p>
+          <p className="text-slate-500">Gerenciamento global de organizações, planos e estatísticas</p>
         </div>
       </header>
 
@@ -131,93 +205,264 @@ export default function SuperAdminDashboard() {
         />
       </div>
 
-      {/* Organizations List */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <h2 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
-            <Activity className="text-slate-400 w-5 h-5" />
-            Organizações Cadastradas
-          </h2>
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-            <input
-              type="text"
-              placeholder="Buscar organização..."
-              className="pl-10 pr-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none w-full md:w-64"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+      {/* Tabs */}
+      <div className="flex gap-4 border-b border-slate-200">
+        <button 
+          onClick={() => setActiveTab('orgs')}
+          className={`pb-4 px-2 font-medium transition-colors relative ${activeTab === 'orgs' ? 'text-emerald-600' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          Organizações
+          {activeTab === 'orgs' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600" />}
+        </button>
+        <button 
+          onClick={() => setActiveTab('plans')}
+          className={`pb-4 px-2 font-medium transition-colors relative ${activeTab === 'plans' ? 'text-emerald-600' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          Planos de Assinatura
+          {activeTab === 'plans' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-600" />}
+        </button>
+      </div>
+
+      {activeTab === 'orgs' ? (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <h2 className="text-xl font-semibold text-slate-800 flex items-center gap-2">
+              <Activity className="text-slate-400 w-5 h-5" />
+              Organizações Cadastradas
+            </h2>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+              <input
+                type="text"
+                placeholder="Buscar organização..."
+                className="pl-10 pr-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none w-full md:w-64"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead className="bg-slate-50 text-slate-500 text-sm font-medium">
+                <tr>
+                  <th className="px-6 py-4">Organização</th>
+                  <th className="px-6 py-4">Plano Atual</th>
+                  <th className="px-6 py-4 text-center">Eventos</th>
+                  <th className="px-6 py-4 text-center">Convidados</th>
+                  <th className="px-6 py-4">Status</th>
+                  <th className="px-6 py-4 text-right">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredOrgs.map((org) => (
+                  <motion.tr 
+                    key={org.id}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="hover:bg-slate-50 transition-colors"
+                  >
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600 font-bold">
+                          {org.nome.charAt(0)}
+                        </div>
+                        <div>
+                          <div className="font-medium text-slate-900">{org.nome}</div>
+                          <div className="text-xs text-slate-500">slug: {org.slug}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <select 
+                        value={org.plan_id || ''} 
+                        onChange={(e) => updateOrgPlan(org.id, parseInt(e.target.value))}
+                        className="text-sm border border-slate-200 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-emerald-500"
+                      >
+                        <option value="">Sem Plano</option>
+                        {plans.map(plan => (
+                          <option key={plan.id} value={plan.id}>{plan.name} ({plan.max_guests} conv.)</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-6 py-4 text-center font-medium text-slate-700">
+                      {org.events_count}
+                    </td>
+                    <td className="px-6 py-4 text-center font-medium text-slate-700">
+                      <div className="flex flex-col items-center">
+                        <span>{org.guests_count}</span>
+                        {org.plan_max_guests && (
+                          <div className="w-16 h-1 bg-slate-100 rounded-full mt-1 overflow-hidden">
+                            <div 
+                              className={`h-full ${org.guests_count >= org.plan_max_guests ? 'bg-red-500' : 'bg-emerald-500'}`}
+                              style={{ width: `${Math.min(100, (org.guests_count / org.plan_max_guests) * 100)}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                        org.status === 'ativo' 
+                          ? 'bg-emerald-100 text-emerald-800' 
+                          : 'bg-red-100 text-red-800'
+                      }`}>
+                        {org.status === 'ativo' ? 'Ativa' : 'Inativa'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <button
+                        onClick={() => toggleOrgStatus(org.id)}
+                        className={`p-2 rounded-lg transition-colors ${
+                          org.status === 'ativo'
+                            ? 'text-red-600 hover:bg-red-50'
+                            : 'text-emerald-600 hover:bg-emerald-50'
+                        }`}
+                        title={org.status === 'ativo' ? 'Desativar' : 'Ativar'}
+                      >
+                        {org.status === 'ativo' ? <PowerOff className="w-5 h-5" /> : <Power className="w-5 h-5" />}
+                      </button>
+                    </td>
+                  </motion.tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
+      ) : (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-semibold text-slate-800">Gestão de Planos</h2>
+            <button 
+              onClick={() => {
+                setEditingPlan(null);
+                setPlanForm({ name: '', max_guests: 50, price: 0, status: 'ativo' });
+                setIsPlanModalOpen(true);
+              }}
+              className="bg-emerald-600 text-white px-4 py-2 rounded-xl hover:bg-emerald-700 transition-colors font-medium flex items-center gap-2"
+            >
+              + Novo Plano
+            </button>
+          </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-slate-50 text-slate-500 text-sm font-medium">
-              <tr>
-                <th className="px-6 py-4">Organização</th>
-                <th className="px-6 py-4 text-center">Eventos</th>
-                <th className="px-6 py-4 text-center">Convidados</th>
-                <th className="px-6 py-4">Data de Criação</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredOrgs.map((org) => (
-                <motion.tr 
-                  key={org.id}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="hover:bg-slate-50 transition-colors"
-                >
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600 font-bold">
-                        {org.nome.charAt(0)}
-                      </div>
-                      <div>
-                        <div className="font-medium text-slate-900">{org.nome}</div>
-                        <div className="text-xs text-slate-500">slug: {org.slug}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-center font-medium text-slate-700">
-                    {org.events_count}
-                  </td>
-                  <td className="px-6 py-4 text-center font-medium text-slate-700">
-                    {org.guests_count}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-slate-500">
-                    {new Date(org.data_criacao).toLocaleDateString('pt-BR')}
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      org.status === 'ativo' 
-                        ? 'bg-emerald-100 text-emerald-800' 
-                        : 'bg-red-100 text-red-800'
-                    }`}>
-                      {org.status === 'ativo' ? 'Ativa' : 'Inativa'}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <button
-                      onClick={() => toggleOrgStatus(org.id)}
-                      className={`p-2 rounded-lg transition-colors ${
-                        org.status === 'ativo'
-                          ? 'text-red-600 hover:bg-red-50'
-                          : 'text-emerald-600 hover:bg-emerald-50'
-                      }`}
-                      title={org.status === 'ativo' ? 'Desativar' : 'Ativar'}
-                    >
-                      {org.status === 'ativo' ? <PowerOff className="w-5 h-5" /> : <Power className="w-5 h-5" />}
-                    </button>
-                  </td>
-                </motion.tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {plans.map(plan => (
+              <div key={plan.id} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900">{plan.name}</h3>
+                    <p className="text-emerald-600 font-semibold text-2xl">R$ {plan.price.toFixed(2)}</p>
+                  </div>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${plan.status === 'ativo' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+                    {plan.status === 'ativo' ? 'Ativo' : 'Inativo'}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-500">Limite de Convidados:</span>
+                    <span className="font-bold text-slate-900">{plan.max_guests}</span>
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-4">
+                  <button 
+                    onClick={() => {
+                      setEditingPlan(plan);
+                      setPlanForm({ name: plan.name, max_guests: plan.max_guests, price: plan.price, status: plan.status });
+                      setIsPlanModalOpen(true);
+                    }}
+                    className="flex-1 py-2 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors text-sm font-medium"
+                  >
+                    Editar
+                  </button>
+                  <button 
+                    onClick={() => deletePlan(plan.id)}
+                    className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  >
+                    <PowerOff className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Plan Modal */}
+      {isPlanModalOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <motion.div 
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl"
+          >
+            <h2 className="text-2xl font-bold text-slate-900 mb-6">
+              {editingPlan ? 'Editar Plano' : 'Novo Plano'}
+            </h2>
+            <form onSubmit={handleSavePlan} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Nome do Plano</label>
+                <input 
+                  type="text" 
+                  required
+                  value={planForm.name}
+                  onChange={e => setPlanForm({ ...planForm, name: e.target.value })}
+                  className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                  placeholder="Ex: Plano Bronze"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Limite de Convidados</label>
+                  <input 
+                    type="number" 
+                    required
+                    value={planForm.max_guests}
+                    onChange={e => setPlanForm({ ...planForm, max_guests: parseInt(e.target.value) })}
+                    className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Preço (R$)</label>
+                  <input 
+                    type="number" 
+                    step="0.01"
+                    required
+                    value={planForm.price}
+                    onChange={e => setPlanForm({ ...planForm, price: parseFloat(e.target.value) })}
+                    className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
+                <select 
+                  value={planForm.status}
+                  onChange={e => setPlanForm({ ...planForm, status: e.target.value as 'ativo' | 'inativo' })}
+                  className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                >
+                  <option value="ativo">Ativo</option>
+                  <option value="inativo">Inativo</option>
+                </select>
+              </div>
+              <div className="flex gap-4 pt-4">
+                <button 
+                  type="button"
+                  onClick={() => setIsPlanModalOpen(false)}
+                  className="flex-1 py-3 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors font-medium"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit"
+                  className="flex-1 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-colors font-medium"
+                >
+                  Salvar
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }
