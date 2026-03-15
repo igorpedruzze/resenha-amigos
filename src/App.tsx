@@ -166,7 +166,12 @@ import {
   Cell, 
   ResponsiveContainer, 
   Tooltip, 
-  Legend 
+  Legend,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid
 } from 'recharts';
 
 interface Cost {
@@ -1286,6 +1291,46 @@ export default function App() {
     } catch (error) {
       console.error('Error fetching admin stats:', error);
     }
+  };
+
+  const handleExportGuests = () => {
+    if (!adminStats || !adminStats.guests) return;
+    
+    const headers = ['ID', 'Nome', 'WhatsApp', 'Email', 'Status Pagamento', 'Valor Total', 'Valor Pago', 'Acompanhantes'];
+    const rows = adminStats.guests.map(g => {
+      const baseTotalDue = g.valor_total !== undefined && g.valor_total !== null ? g.valor_total : (adminStats.eventValue || 500);
+      const totalDue = g.rsvp_status === 'desistente' ? 0 : baseTotalDue;
+      const paid = g.paid || 0;
+      const status = paid >= totalDue ? 'QUITADO' : paid > 0 ? 'PARCIAL' : 'PENDENTE';
+      const companions = g.companions ? g.companions.map((c: any) => c.nome).join('; ') : '';
+      
+      return [
+        g.codigo_convidado || g.id,
+        g.nome,
+        g.whatsapp || '',
+        g.email,
+        status,
+        totalDue,
+        paid,
+        companions
+      ];
+    });
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob(["\ufeff" + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `relatorio_convidados_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('Relatório exportado com sucesso!');
   };
 
   const fetchPendingPayments = async () => {
@@ -3512,59 +3557,11 @@ export default function App() {
               <>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                   <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
-                    <div>
-                      <p className="text-slate-500 text-sm font-medium">Receita Ingressos</p>
-                      <h3 className="text-2xl font-black text-slate-900">{formatCurrency(adminStats.totalArrecadado)}</h3>
-                      <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider mt-1">Pix Recebidos</p>
-                    </div>
-                    <div className="size-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
-                      <Wallet className="size-6" />
-                    </div>
-                  </div>
-
-                  <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
-                    <div>
-                      <p className="text-slate-500 text-sm font-medium">Receita Vendas</p>
-                      <h3 className="text-2xl font-black text-slate-900">{formatCurrency(adminStats.totalVendasExtras)}</h3>
-                      <p className="text-[10px] text-blue-600 font-bold uppercase tracking-wider mt-1">Bebidas/Comidas</p>
-                    </div>
-                    <div className="size-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
-                      <ShoppingBag className="size-6" />
-                    </div>
-                  </div>
-
-                  <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
-                    <div>
-                      <p className="text-slate-500 text-sm font-medium">Custo Total</p>
-                      <h3 className="text-2xl font-black text-slate-900">{formatCurrency(adminStats.totalCustos)}</h3>
-                      <p className="text-[10px] text-red-600 font-bold uppercase tracking-wider mt-1">Despesas</p>
-                    </div>
-                    <div className="size-12 rounded-full bg-red-100 flex items-center justify-center text-red-600">
-                      <DollarSign className="size-6" />
-                    </div>
-                  </div>
-
-                  <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
-                    <div>
-                      <p className="text-slate-500 text-sm font-medium">Saldo Final</p>
-                      <h3 className={`text-2xl font-black ${adminStats.totalArrecadado + adminStats.totalVendasExtras - adminStats.totalCustos >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {formatCurrency(adminStats.totalArrecadado + adminStats.totalVendasExtras - adminStats.totalCustos)}
-                      </h3>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">Lucro / Prejuízo</p>
-                    </div>
-                    <div className={`size-12 rounded-full flex items-center justify-center ${adminStats.totalArrecadado + adminStats.totalVendasExtras - adminStats.totalCustos >= 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
-                      {adminStats.totalArrecadado + adminStats.totalVendasExtras - adminStats.totalCustos >= 0 ? <CheckCircle className="size-6" /> : <AlertCircle className="size-6" />}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                  <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
                     <div className="flex-1">
-                      <p className="text-slate-500 text-sm font-medium">Ocupação do Evento</p>
+                      <p className="text-slate-500 text-sm font-medium">Ocupação</p>
                       <div className="flex items-end gap-2 mt-1">
                         <h3 className="text-2xl font-black text-slate-900">{adminStats.confirmedCount}</h3>
-                        <span className="text-slate-400 font-bold mb-1">/ {adminStats.capacity} pessoas</span>
+                        <span className="text-slate-400 font-bold mb-1">/ {adminStats.capacity}</span>
                       </div>
                       <div className="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden">
                         <div 
@@ -3576,19 +3573,16 @@ export default function App() {
                         ></div>
                       </div>
                     </div>
-                    <div className="size-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 ml-4">
-                      <Users className="size-6" />
-                    </div>
                   </div>
 
                   <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
                     <div>
-                      <p className="text-slate-500 text-sm font-medium">Total de Cadastros</p>
+                      <p className="text-slate-500 text-sm font-medium">Cadastros</p>
                       <h3 className="text-2xl font-black text-slate-900">{adminStats.totalRequests}</h3>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">Convidados + Acompanhantes</p>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">Total Geral</p>
                     </div>
-                    <div className="size-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
-                      <UserPlus className="size-6" />
+                    <div className="size-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
+                      <Users className="size-5" />
                     </div>
                   </div>
 
@@ -3596,18 +3590,62 @@ export default function App() {
                     <div>
                       <p className="text-slate-500 text-sm font-medium">Receita Esperada</p>
                       <h3 className="text-2xl font-black text-slate-900">{formatCurrency(adminStats.totalEsperado)}</h3>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">Total se todos pagarem</p>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">Potencial</p>
                     </div>
-                    <div className="size-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
-                      <TrendingUp className="size-6" />
+                    <div className="size-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
+                      <TrendingUp className="size-5" />
+                    </div>
+                  </div>
+
+                  <div className="bg-emerald-600 p-6 rounded-2xl shadow-xl shadow-emerald-600/20 flex items-center justify-between text-white">
+                    <div>
+                      <p className="text-emerald-100 text-sm font-medium">Lucro Líquido</p>
+                      <h3 className="text-2xl font-black">
+                        {formatCurrency(adminStats.totalArrecadado + adminStats.totalVendasExtras - adminStats.totalCustos)}
+                      </h3>
+                      <p className="text-[10px] text-emerald-200 font-bold uppercase tracking-wider mt-1">Fluxo de Caixa</p>
+                    </div>
+                    <div className="size-10 rounded-full bg-white/20 flex items-center justify-center text-white">
+                      <DollarSign className="size-5" />
                     </div>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-                  <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                  <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                     <div className="px-6 py-5 border-b border-slate-200 flex items-center justify-between">
-                      <h4 className="font-bold text-slate-800">Distribuição Financeira</h4>
+                      <h4 className="font-bold text-slate-800">Performance Financeira</h4>
+                    </div>
+                    <div className="p-6 h-[350px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={[
+                            { 
+                              name: 'Receita', 
+                              Prevista: adminStats.totalEsperado, 
+                              Realizada: adminStats.totalArrecadado 
+                            }
+                          ]}
+                          margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis dataKey="name" axisLine={false} tickLine={false} />
+                          <YAxis axisLine={false} tickLine={false} tickFormatter={(value) => `R$ ${value}`} />
+                          <Tooltip 
+                            formatter={(value: number) => formatCurrency(value)}
+                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                          />
+                          <Legend />
+                          <Bar dataKey="Prevista" fill="#94a3b8" radius={[4, 4, 0, 0]} barSize={60} />
+                          <Bar dataKey="Realizada" fill="#10b981" radius={[4, 4, 0, 0]} barSize={60} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div className="px-6 py-5 border-b border-slate-200 flex items-center justify-between">
+                      <h4 className="font-bold text-slate-800">Distribuição de Receita</h4>
                     </div>
                     <div className="p-6 h-[350px]">
                       <ResponsiveContainer width="100%" height="100%">
@@ -3638,42 +3676,18 @@ export default function App() {
                       </ResponsiveContainer>
                     </div>
                   </div>
-
-                  <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-                    <div className="px-6 py-5 border-b border-slate-200">
-                      <h4 className="font-bold text-slate-800">Resumo de Caixa</h4>
-                    </div>
-                    <div className="p-6 flex-1 flex flex-col justify-center space-y-4">
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500 font-medium">Receita Ingressos</span>
-                        <span className="font-bold text-emerald-600">{formatCurrency(adminStats.totalArrecadado)}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500 font-medium">Receita Vendas</span>
-                        <span className="font-bold text-blue-600">{formatCurrency(adminStats.totalVendasExtras)}</span>
-                      </div>
-                      <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                        <span className="text-slate-900 font-bold">Receita Bruta</span>
-                        <span className="font-black text-slate-900">{formatCurrency(adminStats.totalArrecadado + adminStats.totalVendasExtras)}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500 font-medium">Custo Total</span>
-                        <span className="font-bold text-red-600">{formatCurrency(adminStats.totalCustos)}</span>
-                      </div>
-                      <div className="h-px bg-slate-100 w-full my-2"></div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-900 font-bold">Saldo Líquido</span>
-                        <span className={`text-xl font-black ${adminStats.totalArrecadado + adminStats.totalVendasExtras - adminStats.totalCustos >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                          {formatCurrency(adminStats.totalArrecadado + adminStats.totalVendasExtras - adminStats.totalCustos)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
                 </div>
 
-                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-8">
                   <div className="px-6 md:px-8 py-5 border-b border-slate-200 flex items-center justify-between">
                     <h4 className="font-bold text-slate-800">Lista de Convidados Detalhada</h4>
+                    <button 
+                      onClick={handleExportGuests}
+                      className="flex items-center gap-2 bg-slate-900 hover:bg-black text-white px-4 py-2 rounded-xl text-xs font-bold transition-all"
+                    >
+                      <Download className="size-4" />
+                      Exportar Relatório
+                    </button>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left min-w-[800px]">
